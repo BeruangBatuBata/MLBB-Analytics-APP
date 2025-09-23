@@ -1046,26 +1046,41 @@ def main():
     def sync_checkboxes(name, key):
         st.session_state.tournament_selections[name] = st.session_state[key]
 
-    mode = st.sidebar.radio("Select Analysis Mode:", ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head', 'Synergy & Counter Analysis', 'Playoff Qualification Odds (What-If Scenario)', 'Drafting Assistant'])
+    mode = st.sidebar.radio(
+        "Select Analysis Mode:",
+        ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head',
+         'Synergy & Counter Analysis', 'Playoff Qualification Odds (What-If Scenario)', 
+         'Drafting Assistant']
+    )
 
     st.sidebar.markdown("---")
     st.sidebar.subheader("Select Tournaments")
     
     tab1, tab2 = st.sidebar.tabs(["By Region", "By Year"])
+
     with tab1:
-        # ... (checkbox logic remains the same)
-        regions = defaultdict(list); [regions[data['region']].append(name) for name, data in all_tournaments.items()]
+        regions = defaultdict(list)
+        # <<< FIX: Replaced incorrect list comprehension with a standard for loop
+        for name, data in all_tournaments.items():
+            regions[data['region']].append(name)
+        
         for region in sorted(regions.keys()):
             with st.expander(f"{region} ({len(regions[region])})"):
                 for name in regions[region]:
-                    region_key = f"region_{name}"; st.checkbox(name, key=region_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, region_key))
+                    region_key = f"region_{name}"
+                    st.checkbox(name, key=region_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, region_key))
+
     with tab2:
-        # ... (checkbox logic remains the same)
-        years = defaultdict(list); [years[data['year']].append(name) for name, data in all_tournaments.items()]
+        years = defaultdict(list)
+        # <<< FIX: Replaced incorrect list comprehension with a standard for loop
+        for name, data in all_tournaments.items():
+            years[data['year']].append(name)
+
         for year in sorted(years.keys(), reverse=True):
             with st.expander(f"Year {year} ({len(years[year])})"):
                 for name in years[year]:
-                    year_key = f"year_{name}"; st.checkbox(name, key=year_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, year_key))
+                    year_key = f"year_{name}"
+                    st.checkbox(name, key=year_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, year_key))
 
     st.sidebar.markdown("---")
     
@@ -1075,7 +1090,6 @@ def main():
         if not selected_tournaments:
             st.sidebar.error("Please select at least one tournament.")
         else:
-            # <<< FIX: Perform a hard reset of all data-related session state
             keys_to_reset = ['matches_dict', 'tournaments_shown', 'current_mode', 'data_ready', 'run_sim', 'success_message_shown']
             for key in keys_to_reset:
                 if key in st.session_state:
@@ -1095,19 +1109,19 @@ def main():
                 st.session_state.data_ready = True
             st.rerun()
 
-    # Main display logic now only reads from state
     if st.session_state.get('data_ready', False):
         matches_dict = st.session_state.get('matches_dict', {})
         tournaments_shown = st.session_state.get('tournaments_shown', [])
         current_mode = st.session_state.get('current_mode')
-
+        
         if not matches_dict:
             st.error("Could not load any match data for the selected tournaments.")
             return
 
-        pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+        st.success(f"Displaying analysis for {len(tournaments_shown)} tournament(s). Use the sidebar to change modes or load new data.")
         
-        # Display the correct page based on the mode selected AT THE TIME of the button click
+        pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+
         if current_mode == 'Playoff Qualification Odds (What-If Scenario)':
             if len(tournaments_shown) == 1:
                 tournament_name = tournaments_shown[0]
@@ -1115,7 +1129,7 @@ def main():
                 build_playoff_qualification_ui(matches_for_single_tournament, tournament_name)
             else:
                 st.warning("⚠️ Please select only ONE tournament for Playoff Odds analysis.")
-        else: # Handle all other modes
+        else:
             if current_mode == 'Statistics breakdown':
                 build_statistics_breakdown(pooled_matches, tournaments_shown)
             elif current_mode == 'Hero detail drilldown':
@@ -1136,4 +1150,5 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
