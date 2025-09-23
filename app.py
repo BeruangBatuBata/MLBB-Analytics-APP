@@ -1149,8 +1149,25 @@ def main():
         st.markdown("Please select a mode and at least one tournament from the sidebar, then click **'Analyze'**.")
 
 # <<< FIX: Simplified session state initialization at the end
+# Location: At the end of the script
+
+# Location: At the end of the script
+
 if __name__ == "__main__":
-    if 'analysis_ready' not in st.session_state:
-        st.session_state.analysis_ready = False
+    # Initialize session state keys if they don't exist
+    for key, default_value in [
+        ('analysis_ready', False),
+        ('run_training', False),
+        ('toasts_shown', set()),
+        ('pooled_matches', []),
+        ('tournaments_shown', [])
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default_value
     
+    # <<< FIX: Initialize the central dictionary for checkbox states
+    if 'tournament_selections' not in st.session_state:
+        all_tournaments = {**archived_tournaments, **live_tournaments}
+        st.session_state.tournament_selections = {name: False for name in all_tournaments}
+
     main()
