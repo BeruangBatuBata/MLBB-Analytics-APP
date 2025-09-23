@@ -1125,7 +1125,16 @@ def main():
             elif mode == 'Synergy & Counter Analysis':
                 build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
             elif mode == 'Playoff Qualification Odds (What-If Scenario)':
-                build_playoff_qualification_ui(pooled_matches, tournaments_shown)
+                if len(tournaments_shown) > 1:
+                    st.warning("⚠️ Please select only one tournament to run the Playoff Qualification simulation.")
+                    st.info("This mode analyzes the intricate possibilities within a single league table and does not support combined analysis.")
+                elif len(tournaments_shown) == 1:
+                    # If only one is selected, proceed as normal
+                    tournament_name = tournaments_shown[0]
+                    build_playoff_qualification_ui(pooled_matches, tournament_name)
+                else:
+                    # This case should not be hit due to the button logic, but is here for safety
+                    st.error("No tournament data was loaded.")
             elif mode == 'Drafting Assistant':
                 build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
 
