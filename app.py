@@ -949,9 +949,10 @@ def get_series_outcome_options(teamA, teamB, bo:int):
     return opts
 
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
-# <<< FIX: The function now accepts hashable tuples instead of dictionaries
 def run_monte_carlo_sim(_teams, _wins_tuple, _diff_tuple, _unplayed_matches, _forced_outcomes_tuple, _hashable_brackets, n_sim=10000):
-    # <<< FIX: Convert the tuples back into dictionaries for use in the function
+    # <<< TEST: This message will only appear if the function is re-running (a cache miss)
+    st.warning("DEBUG: SIMULATION IS RE-RUNNING!")
+    
     _current_wins = dict(_wins_tuple)
     _current_diff = dict(_diff_tuple)
     _forced_outcomes = dict(_forced_outcomes_tuple)
@@ -1209,6 +1210,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
