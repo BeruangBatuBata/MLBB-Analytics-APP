@@ -101,6 +101,18 @@ live_tournaments = {
     'MTC S5': {'path': 'MTC_Turkiye_Championship/Season_5', 'region': 'Turkey', 'year': 2025},
 }
 
+# =================================================
+# Team Name Normalization
+# =================================================
+TEAM_NORMALIZATION = {
+    "AP.Bren": "Falcons AP.Bren",
+    "Falcons AP.Bren": "Falcons AP.Bren",
+    "ECHO": "Team Liquid PH",
+    "Team Liquid PH": "Team Liquid PH",
+}
+def normalize_team(n):
+    return TEAM_NORMALIZATION.get((n or "").strip(), (n or "").strip())
+
 # -----------------------
 # DATA LOADING FROM FILES
 # -----------------------
@@ -906,7 +918,11 @@ def parse_matches(matches_raw):
         if not isinstance(m, dict): continue
         opps = m.get("match2opponents", [])
         if len(opps) != 2: continue
-        teamA, teamB = opps[0].get("name", ""), opps[1].get("name", "")
+        
+        # <<< FIX: Use normalize_team on team names
+        teamA = normalize_team(opps[0].get("name", ""))
+        teamB = normalize_team(opps[1].get("name", ""))
+
         if not teamA or not teamB: continue
         dt = pd.to_datetime(m.get("date"), errors="coerce")
         if pd.isnull(dt): continue
@@ -1153,6 +1169,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
