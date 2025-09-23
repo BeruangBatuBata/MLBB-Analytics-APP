@@ -984,10 +984,26 @@ def create_bracket_config_ui(tournament_name):
         {"start": 7, "end": None, "name": "Eliminated"}
     ]
     
+    # <<< FIX: This block now intelligently handles outdated config files
     if 'bracket_config' not in st.session_state:
-        st.session_state.bracket_config = load_config(tournament_name, 'bracket', default=default_brackets)
-    
-    # UI to edit the brackets
+        config_from_file = load_config(tournament_name, 'bracket')
+        
+        # Check if the loaded config is the old, simple version
+        is_outdated = False
+        if config_from_file and isinstance(config_from_file, list) and len(config_from_file) > 0:
+            # A simple heuristic: check if it contains the old "Playoffs" name
+            names = {b.get('name') for b in config_from_file}
+            if "Playoffs" in names:
+                is_outdated = True
+
+        # If the file is outdated or doesn't exist, load the new default. Otherwise, load the user's file.
+        if is_outdated or not config_from_file:
+            st.session_state.bracket_config = default_brackets
+            st.toast("Loaded default bracket configuration.")
+        else:
+            st.session_state.bracket_config = config_from_file
+            
+    # The rest of the UI logic remains the same
     for i, bracket in enumerate(st.session_state.bracket_config):
         st.markdown(f"**Bracket {i+1}**")
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
@@ -1002,13 +1018,11 @@ def create_bracket_config_ui(tournament_name):
 
     st.markdown("---")
     
-    # Action buttons
     c1, c2, c3 = st.columns(3)
     if c1.button("➕ Add Bracket", use_container_width=True):
         st.session_state.bracket_config.append({"start": 0, "end": 0, "name": "New Bracket"})
         st.rerun()
 
-    # <<< FIX: Add a button to reset the configuration to the correct default
     if c2.button("🔄 Reset to Default", use_container_width=True):
         st.session_state.bracket_config = default_brackets
         save_config(tournament_name, 'bracket', st.session_state.bracket_config)
@@ -1149,6 +1163,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
