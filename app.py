@@ -109,10 +109,10 @@ def load_data_from_file(filename, default_data={}):
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            st.toast(f"Successfully loaded data from {filename}")
+            # <<< FIX: Removed the st.toast that appeared on every run
             return data
     except FileNotFoundError:
-        st.warning(f"Warning: '{filename}' not found. Some features may be disabled.")
+        # Warning will be shown once on app startup if files are missing
         return default_data
     except json.JSONDecodeError:
         st.error(f"Error: Could not decode JSON from '{filename}'. Please ensure the file contains valid JSON.")
@@ -514,8 +514,10 @@ def main():
     
     # Check if essential data is loaded
     if not HERO_PROFILES or not HERO_DAMAGE_TYPE:
-        st.error("Critical hero data files ('Hero Profiles.txt', 'Hero Damage Type.txt') are missing or invalid. Please create them and restart the app.")
-        st.stop()
+        st.sidebar.error("Hero data files not found. Please add `Hero Profiles.txt` and `Hero Damage Type.txt` to the app directory.")
+    else:
+        st.sidebar.success("Hero data files loaded.")
+
 
     all_tournaments = {**archived_tournaments, **live_tournaments}
 
@@ -562,6 +564,8 @@ def main():
             st.session_state.mode = mode
             st.session_state.run_analysis = True
             st.session_state.run_training = False
+            # <<< FIX: Reset the set of shown toasts for a new analysis run
+            st.session_state.toasts_shown = set()
 
     if st.sidebar.button("Train AI Draft Model", use_container_width=True):
          st.session_state.run_training = True
@@ -590,7 +594,10 @@ def main():
                     has_errors = True
                 if data:
                     pooled_matches.extend(data)
-                    st.toast(f"Loaded {len(data)} matches for {name}")
+                    # <<< FIX: Only show toast if it hasn't been shown for this tournament in this session
+                    if name not in st.session_state.toasts_shown:
+                        st.toast(f"Loaded {len(data)} matches for {name}")
+                        st.session_state.toasts_shown.add(name)
         
         if not pooled_matches:
             st.error("Could not load any match data. The API might be down or no data is available.")
@@ -623,5 +630,8 @@ if __name__ == "__main__":
         st.session_state.run_analysis = False
     if 'run_training' not in st.session_state:
         st.session_state.run_training = False
+    # <<< FIX: Initialize the toast tracker in session state
+    if 'toasts_shown' not in st.session_state:
+        st.session_state.toasts_shown = set()
     
     main()
