@@ -864,46 +864,29 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     st.markdown("---")
     
-    # <<< FIX: Re-introduced the button to create a stable "snapshot" of the user's settings.
-    if st.button("Run Monte Carlo Simulation", use_container_width=True, type="primary"):
-        # When clicked, save all the inputs for the simulation into the session state.
-        st.session_state.sim_inputs = {
-            "teams": tuple(teams),
-            "current_wins": current_wins,
-            "current_diff": current_diff,
-            "unplayed": tuple(unplayed),
-            "forced": forced_outcomes,
-            "brackets": tuple(tuple(b.items()) for b in brackets),
-            "n_sims": n_sims,
-            "played": played # Also save the 'played' list for the standings table
-        }
-        st.session_state.show_sim_results = True
-
-    # <<< FIX: The display logic is now separate and only runs if the button has been clicked.
-    if st.session_state.get('show_sim_results', False):
-        # Use the "snapshot" of inputs from the session state to run the simulation.
-        sim_inputs = st.session_state.sim_inputs
-        df_probs = run_monte_carlo_sim(
-            sim_inputs["teams"], 
-            sim_inputs["current_wins"], 
-            sim_inputs["current_diff"], 
-            sim_inputs["unplayed"], 
-            sim_inputs["forced"], 
-            sim_inputs["brackets"], 
-            n_sim=sim_inputs["n_sims"]
-        )
-        
-        # Use the saved 'played' list to build the standings table.
-        standings_df = build_standings_table(list(sim_inputs["teams"]), sim_inputs["played"])
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Qualification Probabilities")
-            st.dataframe(df_probs, use_container_width=True)
-            offer_csv_download_button(df_probs, "playoff_probabilities.csv")
-        with col2:
-            st.subheader("Current Standings (Up to Cutoff)")
-            st.dataframe(standings_df, use_container_width=True)
+    # <<< FIX: The "Run" button is removed. This section now runs on every interaction.
+    hashable_brackets = tuple(tuple(b.items()) for b in brackets)
+    
+    df_probs = run_monte_carlo_sim(
+        _teams=tuple(teams), 
+        _current_wins=current_wins, 
+        _current_diff=current_diff, 
+        _unplayed_matches=tuple(unplayed), 
+        _forced_outcomes=forced_outcomes, 
+        _hashable_brackets=hashable_brackets, 
+        n_sim=n_sims
+    )
+    
+    standings_df = build_standings_table(teams, played)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Qualification Probabilities")
+        st.dataframe(df_probs, use_container_width=True)
+        offer_csv_download_button(df_probs, "playoff_probabilities.csv")
+    with col2:
+        st.subheader("Current Standings (Up to Cutoff)")
+        st.dataframe(standings_df, use_container_width=True)
             
 def build_enhanced_draft_assistant_ui(*args, **kwargs):
     st.header("Drafting Assistant")
@@ -1008,6 +991,52 @@ def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches,
                     break
                     
     prob_data = [{"Team": t, **{f"{b['name']} (%)": finish_counter[t][b["name"]] / n_sim * 100 for b in _brackets}} for t in _teams]
+    return pd.DataFrame(prob_data).round(2)
+
+@st.cache_data(show_spinner="Running Group Stage Monte Carlo simulation...")
+def monte_carlo_sim_groups(_groups, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
+    _brackets = [dict(b) for b in _hashable_brackets]
+    teams = [t for g_teams in _groups.values() for t in g_teams]
+    finish_counter = {t: {b["name"]: 0 for b in _brackets} for t in teams}
+
+    for _ in range(n_sim):
+        sim_wins, sim_diff = _current_wins.copy(), _current_diff.copy()
+
+        for a, b, dt, bo in _unplayed_matches:
+            outcome = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
+            if outcome == "random":
+                options = [c for (_, c) in get_series_outcome_options(a, b, bo) if c != "random"]
+                if not options: continue
+                outcome = random.choice(options)
+            
+            if outcome.startswith("A"):
+                winner, loser, scores = a, b, outcome.split('_')[1]
+            elif outcome.startswith("B"):
+                winner, loser, scores = b, a, outcome.split('_')[1]
+            else: continue
+            
+            w, l = map(int, scores.split('-'))
+            sim_wins[winner] += 1
+            sim_diff[winner] += w - l
+            sim_diff[loser] += l - w
+
+        group_rankings = {}
+        for g_name, g_teams in _groups.items():
+            ranked = sorted(g_teams, key=lambda t: (sim_wins[t], sim_diff[t], random.random()), reverse=True)
+            group_rankings[g_name] = ranked
+
+        # This part assumes a simple "top X from each group qualify" logic
+        # A full implementation would need to parse the complex qualification rules.
+        all_ranked_teams = [team for ranking in group_rankings.values() for team in ranking]
+        
+        for pos, t in enumerate(all_ranked_teams):
+            rank = pos + 1
+            for bracket in _brackets:
+                if bracket["start"] <= rank <= (bracket["end"] if bracket["end"] is not None else 999):
+                    finish_counter[t][bracket["name"]] += 1
+                    break
+    
+    prob_data = [{"Team": t, **{f"{b['name']} (%)": finish_counter[t][b["name"]] / n_sim * 100 for b in _brackets}} for t in teams]
     return pd.DataFrame(prob_data).round(2)
 
 def build_standings_table(teams, played_matches):
@@ -1177,6 +1206,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
