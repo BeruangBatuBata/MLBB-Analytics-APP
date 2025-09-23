@@ -109,10 +109,8 @@ def load_data_from_file(filename, default_data={}):
     try:
         with open(filename, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            # <<< FIX: Removed the st.toast that appeared on every run
             return data
     except FileNotFoundError:
-        # Warning will be shown once on app startup if files are missing
         return default_data
     except json.JSONDecodeError:
         st.error(f"Error: Could not decode JSON from '{filename}'. Please ensure the file contains valid JSON.")
@@ -135,7 +133,7 @@ def safe_cache_key(key):
 def local_cache_path(key):
     return os.path.join(cache_dir, safe_cache_key(key) + ".json")
 
-@st.cache_data(ttl=300) # Cache for 5 minutes
+@st.cache_data(ttl=300)
 def load_tournament_matches(_tournament_path):
     """Load match data from Liquipedia API and return (data, error_message)."""
     try:
@@ -512,7 +510,6 @@ def build_enhanced_draft_assistant_ui(*args, **kwargs):
 def main():
     st.sidebar.title(" MLBB Analytics Dashboard")
     
-    # Check if essential data is loaded
     if not HERO_PROFILES or not HERO_DAMAGE_TYPE:
         st.sidebar.error("Hero data files not found. Please add `Hero Profiles.txt` and `Hero Damage Type.txt` to the app directory.")
     else:
@@ -521,6 +518,7 @@ def main():
 
     all_tournaments = {**archived_tournaments, **live_tournaments}
 
+    # <<< FIX: The radio button's value now directly controls the view after data is loaded.
     mode = st.sidebar.radio(
         "Select Analysis Mode:",
         ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head',
@@ -556,82 +554,86 @@ def main():
     selected_tournaments = sorted(list(set(selected_tournaments)))
     st.sidebar.markdown("---")
 
+    # <<< FIX: This button now primarily loads data and sets a flag that analysis is ready.
     if st.sidebar.button("Analyze Selected Tournaments", use_container_width=True, type="primary"):
         if not selected_tournaments:
             st.sidebar.error("Please select at least one tournament.")
         else:
-            st.session_state.selected_tournaments = selected_tournaments
-            st.session_state.mode = mode
-            st.session_state.run_analysis = True
-            st.session_state.run_training = False
-            # <<< FIX: Reset the set of shown toasts for a new analysis run
-            st.session_state.toasts_shown = set()
+            with st.spinner(f"Loading data for {len(selected_tournaments)} tournament(s)..."):
+                pooled_matches = []
+                has_errors = False
+                st.session_state.toasts_shown = set() # Reset toasts for new analysis
+                for name in selected_tournaments:
+                    path = all_tournaments[name]['path']
+                    data, error = load_tournament_matches(path)
+                    
+                    if error:
+                        st.warning(error)
+                        has_errors = True
+                    if data:
+                        pooled_matches.extend(data)
+                        if name not in st.session_state.toasts_shown:
+                            st.toast(f"Loaded {len(data)} matches for {name}")
+                            st.session_state.toasts_shown.add(name)
+            
+            st.session_state.pooled_matches = pooled_matches
+            st.session_state.tournaments_shown = selected_tournaments
+            st.session_state.analysis_ready = True
 
     if st.sidebar.button("Train AI Draft Model", use_container_width=True):
          st.session_state.run_training = True
-         st.session_state.run_analysis = False
+         st.session_state.analysis_ready = False # Stop analysis view
          st.session_state.selected_tournaments_for_training = selected_tournaments
 
-    if st.session_state.get('run_training', False):
+    # <<< FIX: This logic block now runs if analysis is ready, and uses the live radio button value.
+    if st.session_state.get('analysis_ready', False):
+        pooled_matches = st.session_state.pooled_matches
+        tournaments_shown = st.session_state.tournaments_shown
+
+        if not pooled_matches:
+            st.error("Could not load any match data. The API might be down or no data is available.")
+        else:
+            # The success message now appears in the main area once
+            if 'success_message_shown' not in st.session_state:
+                 st.success(f"Successfully loaded data for {len(tournaments_shown)} tournament(s). Total matches found: {len(pooled_matches)}")
+                 st.session_state.success_message_shown = True
+
+            if mode == 'Statistics breakdown':
+                build_statistics_breakdown(pooled_matches, tournaments_shown)
+            elif mode == 'Hero detail drilldown':
+                build_hero_drilldown_ui(pooled_matches, tournaments_shown)
+            elif mode == 'Head-to-head':
+                build_head_to_head_dashboard(pooled_matches, tournaments_shown)
+            elif mode == 'Synergy & Counter Analysis':
+                build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
+            elif mode == 'Playoff Qualification Odds (What-If Scenario)':
+                build_playoff_qualification_ui(pooled_matches, tournaments_shown)
+            elif mode == 'Drafting Assistant':
+                build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
+
+    elif st.session_state.get('run_training', False):
         st.header("AI Model Training")
         training_selection = st.session_state.get('selected_tournaments_for_training', [])
         if not training_selection:
             st.error("Please select tournaments from the sidebar to use as training data, then click 'Train AI Draft Model' again.")
         else:
             st.info("Placeholder for AI Training logic.")
-        st.session_state.run_training = False
+        st.session_state.run_training = False # Reset flag
 
-    elif st.session_state.get('run_analysis', False):
-        with st.spinner(f"Loading data for {len(st.session_state.selected_tournaments)} tournament(s)..."):
-            pooled_matches = []
-            has_errors = False
-            for name in st.session_state.selected_tournaments:
-                path = all_tournaments[name]['path']
-                data, error = load_tournament_matches(path)
-                
-                if error:
-                    st.warning(error)
-                    has_errors = True
-                if data:
-                    pooled_matches.extend(data)
-                    # <<< FIX: Only show toast if it hasn't been shown for this tournament in this session
-                    if name not in st.session_state.toasts_shown:
-                        st.toast(f"Loaded {len(data)} matches for {name}")
-                        st.session_state.toasts_shown.add(name)
-        
-        if not pooled_matches:
-            st.error("Could not load any match data. The API might be down or no data is available.")
-        else:
-            if not has_errors:
-                st.success(f"Successfully loaded data for {len(st.session_state.selected_tournaments)} tournament(s). Total matches found: {len(pooled_matches)}")
-
-            mode_to_run = st.session_state.mode
-            tournaments_shown = st.session_state.selected_tournaments
-
-            if mode_to_run == 'Statistics breakdown':
-                build_statistics_breakdown(pooled_matches, tournaments_shown)
-            elif mode_to_run == 'Hero detail drilldown':
-                build_hero_drilldown_ui(pooled_matches, tournaments_shown)
-            elif mode_to_run == 'Head-to-head':
-                build_head_to_head_dashboard(pooled_matches, tournaments_shown)
-            elif mode_to_run == 'Synergy & Counter Analysis':
-                build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
-            elif mode_to_run == 'Playoff Qualification Odds (What-If Scenario)':
-                build_playoff_qualification_ui(pooled_matches, tournaments_shown)
-            elif mode_to_run == 'Drafting Assistant':
-                build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
-    
     else:
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
         st.markdown("Please select a mode and at least one tournament from the sidebar, then click **'Analyze'**.")
 
 if __name__ == "__main__":
-    if 'run_analysis' not in st.session_state:
-        st.session_state.run_analysis = False
-    if 'run_training' not in st.session_state:
-        st.session_state.run_training = False
-    # <<< FIX: Initialize the toast tracker in session state
-    if 'toasts_shown' not in st.session_state:
-        st.session_state.toasts_shown = set()
+    # Initialize session state keys if they don't exist
+    for key, default_value in [
+        ('analysis_ready', False),
+        ('run_training', False),
+        ('toasts_shown', set()),
+        ('pooled_matches', []),
+        ('tournaments_shown', [])
+    ]:
+        if key not in st.session_state:
+            st.session_state[key] = default_value
     
     main()
