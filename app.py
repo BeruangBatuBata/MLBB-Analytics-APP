@@ -766,98 +766,82 @@ def plot_counter_heatmap(df, title):
 
 def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
     st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
-
-    # <<< FIX: Add a debug message to confirm the data being processed
-    st.info(f"**Debug Info:** Analyzing tournament '{tournament_name}' with `{len(matches_for_tournament)}` raw match records.")
     
-    if not matches_for_tournament:
-        st.error("No match data was passed to the simulation engine. Cannot proceed.")
+    # --- Step 1: Determine Tournament Format (Single Table vs Groups) ---
+    format_key = f"format_{tournament_name}"
+    if format_key not in st.session_state:
+        st.session_state[format_key] = load_config(tournament_name, 'format', default={'type': 'unknown'})['type']
+
+    if st.session_state[format_key] == 'unknown':
+        st.subheader("Tournament Format Setup")
+        st.info("First, please specify the format for this tournament. This is a one-time setup.")
+        c1, c2 = st.columns(2)
+        if c1.button("Single Table / League", use_container_width=True):
+            save_config(tournament_name, 'format', {'type': 'single'})
+            st.session_state[format_key] = 'single'
+            st.rerun()
+        if c2.button("Group Stage", use_container_width=True):
+            st.warning("Group Stage mode is not fully implemented in this version.")
+            # save_config(tournament_name, 'format', {'type': 'groups'})
+            # st.session_state[format_key] = 'groups'
+            # st.rerun()
         return
 
-    # --- Data Preparation ---
+    # --- Step 2: Route to the correct dashboard ---
+    if st.session_state[format_key] == 'single':
+        playoff_dashboard_single(matches_for_tournament, tournament_name)
+    elif st.session_state[format_key] == 'groups':
+        st.info("Group stage dashboard is under construction.")
+
+def playoff_dashboard_single(matches_for_tournament, tournament_name):
+    # This function contains the main UI for the single-table simulation
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
     
     if not regular_season_matches:
-        st.warning("No regular season matches could be identified for this tournament.")
-        return
+        st.warning("No regular season matches found for this tournament."); return
         
     teams = sorted(list(set(m['teamA'] for m in regular_season_matches) | set(m['teamB'] for m in regular_season_matches)))
     all_dates = sorted(list(set(m['date'] for m in regular_season_matches)))
     week_blocks = build_week_blocks(all_dates)
 
-    # --- Bracket Configuration ---
-    brackets = [
-        {"start": 1, "end": 2, "name": "Upper Bracket", "color": "#4CAF50"},
-        {"start": 3, "end": 6, "name": "Lower Bracket", "color": "#2196F3"},
-        {"start": 7, "end": None, "name": "Eliminated", "color": "#f44336"}
-    ]
+    with st.expander("⚙️ Configure Brackets & Settings"):
+        create_bracket_config_ui(tournament_name)
+        st.session_state.n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000)
 
-    # --- UI for selecting cutoff week ---
+    brackets = st.session_state.bracket_config
+    
     week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
     week_options[-1] = "Pre-Season (0 matches played)"
     
-    if not week_options:
-        st.warning("No match dates found to create week blocks.")
-        return
+    if not week_options: st.warning("No match dates found."); return
 
-    cutoff_week_idx = st.select_slider(
-        "Select Cutoff Week (Simulate from this point forward)",
-        options=sorted(week_options.keys()),
-        format_func=lambda x: week_options[x],
-        value=max(week_options.keys())
-    )
+    cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=max(week_options.keys()))
 
-    # --- Determine played vs. unplayed matches based on slider ---
-    played, unplayed = [], []
-    current_wins = {t: 0 for t in teams}
-    current_diff = {t: 0 for t in teams}
-    
+    played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
     cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
 
     for m in regular_season_matches:
         if m['date'] <= cutoff_date:
             played.append(m)
-            if m['winner'] in ('1', '2'):
-                winner = m['teamA'] if m['winner'] == '1' else m['teamB']
-                current_wins[winner] += 1
-            current_diff[m['teamA']] += m['scoreA'] - m['scoreB']
-            current_diff[m['teamB']] += m['scoreB'] - m['scoreA']
+            if m['winner'] in ('1', '2'): current_wins[m['teamA'] if m['winner'] == '1' else m['teamB']] += 1
+            current_diff[m['teamA']] += m['scoreA'] - m['scoreB']; current_diff[m['teamB']] += m['scoreB'] - m['scoreA']
         else:
             unplayed.append((m['teamA'], m['teamB'], m['date'], m['bestof']))
 
-    # --- "What-If" Scenario UI ---
     st.subheader("🔮 What-If Scenarios for Upcoming Matches")
-    
-    if 'match_predictions' not in st.session_state:
-        st.session_state.match_predictions = {}
-
     forced_outcomes = {}
-    
-    for week_idx, week_dates in enumerate(week_blocks):
-        if week_dates[0] > cutoff_date:
-            week_matches = [m for m in unplayed if m[2] in week_dates]
-            if not week_matches: continue
-            
-            with st.expander(f"Week {week_idx + 1} Matches ({week_dates[0]} to {week_dates[-1]})"):
-                for teamA, teamB, date, bestof in week_matches:
-                    match_key = f"{teamA}|{teamB}|{date}"
-                    
-                    outcomes = {
-                        "random": "Random",
-                        f"A_{'2-0' if bestof==3 else '1-0'}": f"{teamA} Wins",
-                        f"B_{'2-0' if bestof==3 else '1-0'}": f"{teamB} Wins"
-                    }
-                    
-                    selected_outcome = st.radio(
-                        f"**{teamA} vs {teamB}** ({date})",
-                        options=outcomes.keys(),
-                        format_func=lambda x: outcomes[x],
-                        horizontal=True,
-                        key=match_key,
-                        index=0
-                    )
-                    forced_outcomes[match_key] = selected_outcome
+    if unplayed:
+        for week_idx, week_dates in enumerate(week_blocks):
+            if week_dates and week_dates[0] > cutoff_date:
+                week_matches = [m for m in unplayed if m[2] in week_dates]
+                if not week_matches: continue
+                with st.expander(f"Week {week_idx + 1} Matches ({week_dates[0]} to {week_dates[-1]})"):
+                    for teamA, teamB, date, bestof in week_matches:
+                        match_key = f"{teamA}|{teamB}|{date}"; outcomes = {"random": "Random", f"A_2-0": f"{teamA} 2-0", f"A_2-1": f"{teamA} 2-1", f"B_2-1": f"{teamB} 2-1", f"B_2-0": f"{teamB} 2-0"}
+                        forced_outcomes[match_key] = st.radio(f"**{teamA} vs {teamB}** ({date})", options=outcomes.keys(), format_func=lambda x: outcomes[x], horizontal=True, key=match_key)
+    else:
+        st.info("All regular season matches up to the selected cutoff have been played.")
 
     st.markdown("---")
     if st.button("Run Monte Carlo Simulation", use_container_width=True, type="primary"):
@@ -866,19 +850,12 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
 
     if st.session_state.get('run_sim', False):
         hashable_brackets = tuple(tuple(b.items()) for b in brackets)
-        df_probs = run_monte_carlo_sim(
-            tuple(teams), current_wins, current_diff, 
-            tuple(unplayed), st.session_state.forced_outcomes_for_run, 
-            hashable_brackets
-        )
-        
+        df_probs = run_monte_carlo_sim(tuple(teams), current_wins, current_diff, tuple(unplayed), st.session_state.forced_outcomes_for_run, hashable_brackets, n_sim=st.session_state.n_sims)
         standings_df = build_standings_table(teams, played)
-
         col1, col2 = st.columns(2)
         with col1:
             st.subheader("Qualification Probabilities")
-            st.dataframe(df_probs, use_container_width=True)
-            offer_csv_download_button(df_probs, "playoff_probabilities.csv")
+            st.dataframe(df_probs, use_container_width=True); offer_csv_download_button(df_probs, "playoff_probabilities.csv")
         with col2:
             st.subheader("Current Standings (Up to Cutoff)")
             st.dataframe(standings_df, use_container_width=True)
@@ -893,6 +870,13 @@ def build_enhanced_draft_assistant_ui(*args, **kwargs):
 # =================================================
 
 def parse_matches(matches_raw):
+    # This function is the robust version from our debugging
+    if not matches_raw: return []
+    first_parent = matches_raw[0].get("parent")
+    if first_parent and any(m.get("parent") != first_parent for m in matches_raw):
+        st.error("Data integrity error: Mixed tournament data detected.")
+        return []
+    
     out = []
     for m in matches_raw:
         if not isinstance(m, dict): continue
@@ -900,17 +884,13 @@ def parse_matches(matches_raw):
         if len(opps) != 2: continue
         teamA, teamB = opps[0].get("name", ""), opps[1].get("name", "")
         if not teamA or not teamB: continue
-        
         dt = pd.to_datetime(m.get("date"), errors="coerce")
         if pd.isnull(dt): continue
-
-        is_playoff = m.get("section", "").lower() == "playoffs"
-        
         out.append({
             "date": dt.date(), "teamA": teamA, "teamB": teamB,
             "bestof": int(m.get("bestof", 3)), "winner": str(m.get("winner", "")),
             "scoreA": int(opps[0].get("score", 0)), "scoreB": int(opps[1].get("score", 0)),
-            "is_playoff": is_playoff
+            "is_playoff": m.get("section", "").lower() == "playoffs"
         })
     return sorted(out, key=lambda x: x["date"])
 
@@ -918,107 +898,88 @@ def build_week_blocks(dates):
     if not dates: return []
     blocks = [[dates[0]]]
     for prev, curr in zip(dates, dates[1:]):
-        if (curr - prev).days <= 2: # Allow for a day break in a "week"
+        if (curr - prev).days <= 2:
             blocks[-1].append(curr)
         else:
             blocks.append([curr])
     return blocks
 
-# --- Config Management (reading/writing local JSON files) ---
 def get_config_cache_key(tournament_name, config_type):
     return f".{config_type}_config_{tournament_name.replace(' ', '_')}.json"
 
-def load_config(tournament_name, config_type):
+def load_config(tournament_name, config_type, default=None):
     try:
         cache_file = get_config_cache_key(tournament_name, config_type)
         if os.path.exists(cache_file):
-            with open(cache_file, 'r') as f:
-                return json.load(f)
-    except:
-        pass
-    return None
+            with open(cache_file, 'r') as f: return json.load(f)
+    except: pass
+    return default
 
 def save_config(tournament_name, config_type, config):
     try:
-        cache_file = get_config_cache_key(tournament_name, config_type)
-        with open(cache_file, 'w') as f:
-            json.dump(config, f)
+        with open(get_config_cache_key(tournament_name, config_type), 'w') as f: json.dump(config, f)
         return True
-    except:
-        return False
-
-# --- Monte Carlo Simulations (Cached for performance) ---
-# Location: In the "Helper Functions for Playoff Qualification Odds" section
+    except: return False
 
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
-# <<< FIX: The last argument is renamed to reflect its hashable format
 def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
-    # <<< FIX: Reconstruct the list of dictionaries from the hashable input
     _brackets = [dict(b) for b in _hashable_brackets]
-    
     finish_counter = {t: {b["name"]: 0 for b in _brackets} for t in _teams}
-    
     for _ in range(n_sim):
-        sim_wins = _current_wins.copy()
-        sim_diff = _current_diff.copy()
-
+        sim_wins, sim_diff = _current_wins.copy(), _current_diff.copy()
         for a, b, dt, bo in _unplayed_matches:
             outcome = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
             if outcome == "random":
                 winner, loser = (a, b) if random.random() > 0.5 else (b, a)
                 w, l = (2, 1) if bo == 3 and random.random() > 0.5 else (2,0) if bo == 3 else (1,0)
             else:
-                winner_char, scores = outcome.split("_")
-                w, l = map(int, scores.split('-'))
+                winner_char, scores = outcome.split("_"); w, l = map(int, scores.split('-'))
                 winner, loser = (a, b) if winner_char == 'A' else (b, a)
-            
-            sim_wins[winner] += 1
-            sim_diff[winner] += w - l
-            sim_diff[loser] += l - w
-        
+            sim_wins[winner] += 1; sim_diff[winner] += w - l; sim_diff[loser] += l - w
         ranked = sorted(_teams, key=lambda t: (sim_wins[t], sim_diff[t], random.random()), reverse=True)
         for pos, t in enumerate(ranked):
             rank = pos + 1
             for bracket in _brackets:
-                start = bracket["start"]
-                end = bracket["end"] if bracket["end"] is not None else 999
-                if start <= rank <= end:
-                    finish_counter[t][bracket["name"]] += 1
-                    break
-    
-    prob_data = []
-    for t in _teams:
-        row = {"Team": t}
-        for bracket in _brackets:
-            row[f"{bracket['name']} (%)"] = finish_counter[t][bracket["name"]] / n_sim * 100
-        prob_data.append(row)
-    
+                if bracket["start"] <= rank <= (bracket["end"] if bracket["end"] is not None else 999):
+                    finish_counter[t][bracket["name"]] += 1; break
+    prob_data = [{"Team": t, **{f"{b['name']} (%)": finish_counter[t][b["name"]] / n_sim * 100 for b in _brackets}} for t in _teams]
     return pd.DataFrame(prob_data).round(2)
 
-# --- Standings Calculation ---
 def build_standings_table(teams, played_matches):
     stats = {t: {'mw': 0, 'ml': 0, 'gw': 0, 'gl': 0} for t in teams}
     for m in played_matches:
         a, b = m["teamA"], m["teamB"]
-        stats[a]['gw'] += m["scoreA"]; stats[a]['gl'] += m["scoreB"]
-        stats[b]['gw'] += m["scoreB"]; stats[b]['gl'] += m["scoreA"]
-        if m["winner"] == "1":
-            stats[a]['mw'] += 1; stats[b]['ml'] += 1
-        elif m["winner"] == "2":
-            stats[b]['mw'] += 1; stats[a]['ml'] += 1
-
-    standings = [{
-        "Team": t,
-        "Match W-L": f"{s['mw']}-{s['ml']}",
-        "Game W-L": f"{s['gw']}-{s['gl']}",
-        "Diff": s['gw'] - s['gl'],
-        "_sort_mw": s['mw']
-    } for t, s in stats.items()]
-    
+        if a not in teams or b not in teams: continue
+        stats[a]['gw'] += m["scoreA"]; stats[a]['gl'] += m["scoreB"]; stats[b]['gw'] += m["scoreB"]; stats[b]['gl'] += m["scoreA"]
+        if m["winner"] == "1": stats[a]['mw'] += 1; stats[b]['ml'] += 1
+        elif m["winner"] == "2": stats[b]['mw'] += 1; stats[a]['ml'] += 1
+    standings = [{"Team": t, "Match W-L": f"{s['mw']}-{s['ml']}", "Game W-L": f"{s['gw']}-{s['gl']}", "Diff": s['gw'] - s['gl'], "_sort_mw": s['mw']} for t, s in stats.items()]
     df = pd.DataFrame(standings)
-    if not df.empty:
-        df = df.sort_values(by=["_sort_mw", "Diff"], ascending=False).drop(columns=["_sort_mw"])
-    return df
+    return df.sort_values(by=["_sort_mw", "Diff"], ascending=False).drop(columns=["_sort_mw"]) if not df.empty else df
+
+def create_bracket_config_ui(tournament_name):
+    st.subheader("⚙️ Configure Playoff Brackets")
+    default_brackets = [{"start": 1, "end": 6, "name": "Playoffs"}, {"start": 7, "end": None, "name": "Eliminated"}]
+    if 'bracket_config' not in st.session_state:
+        st.session_state.bracket_config = load_config(tournament_name, 'bracket', default=default_brackets)
+    
+    for i, bracket in enumerate(st.session_state.bracket_config):
+        c1, c2, c3, c4 = st.columns([2,1,1,1])
+        bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}")
+        bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}")
+        end_val = bracket['end'] if bracket['end'] is not None else 0
+        new_end = c3.number_input("End Rank (0 for last)", value=end_val, min_value=0, key=f"br_end_{i}")
+        bracket['end'] = new_end if new_end > 0 else None
+        if c4.button("❌", key=f"br_del_{i}"):
+            st.session_state.bracket_config.pop(i); st.rerun()
+
+    if st.button("➕ Add Bracket"):
+        st.session_state.bracket_config.append({"start": 0, "end": 0, "name": "New Bracket"})
+        st.rerun()
+
+    if st.button("💾 Save Bracket Configuration", type="primary"):
+        save_config(tournament_name, 'bracket', st.session_state.bracket_config)
+        st.success("Bracket configuration saved!")
 
 
 # =============================================================================
@@ -1150,5 +1111,6 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
