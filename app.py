@@ -776,35 +776,39 @@ def plot_counter_heatmap(df, title):
     plt.tight_layout()
     st.pyplot(fig) # <<< Renders the plot in Streamlit
 
-def playoff_dashboard_single(matches_for_tournament, tournament_name):
+# Location: Add this single function to replace the two old ones.
+
+def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
+    st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
+
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
     
     if not regular_season_matches:
-        st.warning("No regular season matches found for this tournament."); return
+        st.warning("No regular season matches could be identified for this tournament.")
+        return
         
     teams = sorted(list(set(m['teamA'] for m in regular_season_matches) | set(m['teamB'] for m in regular_season_matches)))
     all_dates = sorted(list(set(m['date'] for m in regular_season_matches)))
     week_blocks = build_week_blocks(all_dates)
 
-    # <<< FIX: Re-introduced the configuration expander
+    # --- Configuration UI ---
     with st.expander("⚙️ Configure Brackets & Settings"):
         create_bracket_config_ui(tournament_name)
         n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000, key=f"n_sims_{tournament_name}")
-
-    # <<< FIX: The brackets are now read dynamically from the session state managed by the UI
+    
     brackets = st.session_state.bracket_config
     
+    # --- Interactive Slider ---
     week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
     week_options[-1] = "Pre-Season (0 matches played)"
     
-    if not week_options: st.warning("No match dates found."); return
-
     last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
     default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
     
     cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=default_week_idx)
 
+    # --- Data Splitting Logic ---
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
     cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
 
@@ -816,6 +820,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         else:
             unplayed.append((m['teamA'], m['teamB'], m['date'], m['bestof']))
 
+    # --- What-If Scenarios UI ---
     st.subheader("🔮 What-If Scenarios for Upcoming Matches")
     forced_outcomes = {}
     if unplayed:
@@ -832,6 +837,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     st.markdown("---")
     
+    # --- Simulation, Sorting, and Display ---
     hashable_brackets = tuple(tuple(b.items()) for b in brackets)
     
     df_probs = run_monte_carlo_sim(
@@ -842,111 +848,6 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         _forced_outcomes_tuple=tuple(sorted(forced_outcomes.items())),
         _hashable_brackets=hashable_brackets, 
         n_sim=n_sims
-    )
-    
-    standings_df = build_standings_table(teams, played)
-
-    if not standings_df.empty:
-        standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
-    
-    if not df_probs.empty and not standings_df.empty:
-        team_order = standings_df['Team'].tolist()
-        try:
-            df_probs['Team'] = pd.Categorical(df_probs['Team'], categories=team_order, ordered=True)
-            df_probs = df_probs.sort_values('Team')
-            df_probs.insert(0, "Rank", range(1, len(df_probs) + 1))
-        except Exception as e:
-            st.error(f"An error occurred during sorting: {e}")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Qualification Probabilities")
-        st.dataframe(df_probs, use_container_width=True, hide_index=True)
-        offer_csv_download_button(df_probs, "playoff_probabilities.csv")
-    with col2:
-        st.subheader("Current Standings (Up to Cutoff)")
-        st.dataframe(standings_df, use_container_width=True, hide_index=True)
-
-
-def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
-    st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
-
-    # --- 1. Data Preparation (Same as before) ---
-    all_matches = parse_matches(matches_for_tournament)
-    regular_season_matches = [m for m in all_matches if not m['is_playoff']]
-    if not regular_season_matches:
-        st.warning("No regular season matches could be identified for this tournament.")
-        return
-        
-    teams = sorted(list(set(m['teamA'] for m in regular_season_matches) | set(m['teamB'] for m in regular_season_matches)))
-    all_dates = sorted(list(set(m['date'] for m in regular_season_matches)))
-    week_blocks = build_week_blocks(all_dates)
-
-    # --- 2. Re-introduce the interactive "Cutoff Week" slider ---
-    week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
-    week_options[-1] = "Pre-Season (0 matches played)"
-    
-    if not week_options:
-        st.warning("No match dates found to create week blocks.")
-        return
-
-    last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
-    default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
-    
-    cutoff_week_idx = st.select_slider(
-        "Select Cutoff Week (Simulate from this point forward)", 
-        options=sorted(week_options.keys()), 
-        format_func=lambda x: week_options[x], 
-        value=default_week_idx
-    )
-
-    # --- 3. Re-introduce logic to split matches and calculate current stats based on the slider ---
-    played, unplayed = [], []
-    current_wins = {t: 0 for t in teams}
-    current_diff = {t: 0 for t in teams}
-    cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
-
-    for m in regular_season_matches:
-        if m['date'] <= cutoff_date:
-            played.append(m)
-            if m['winner'] in ('1', '2'): current_wins[m['teamA'] if m['winner'] == '1' else m['teamB']] += 1
-            current_diff[m['teamA']] += m['scoreA'] - m['scoreB']; current_diff[m['teamB']] += m['scoreB'] - m['scoreA']
-        else:
-            unplayed.append((m['teamA'], m['teamB'], m['date'], m['bestof']))
-
-    # --- 4. Re-introduce the "What-If Scenarios" UI ---
-    st.subheader("🔮 What-If Scenarios for Upcoming Matches")
-    forced_outcomes = {}
-    if unplayed:
-        for week_idx, week_dates in enumerate(week_blocks):
-            if week_dates and week_dates[0] > cutoff_date:
-                week_matches = [m for m in unplayed if m[2] in week_dates]
-                if not week_matches: continue
-                with st.expander(f"Week {week_idx + 1} Matches ({week_dates[0]} to {week_dates[-1]})"):
-                    for teamA, teamB, date, bestof in week_matches:
-                        match_key = f"{teamA}|{teamB}|{date}"; outcomes = {"random": "Random", "A_2-0": f"{teamA} 2-0", "A_2-1": f"{teamA} 2-1", "B_2-1": f"{teamB} 2-1", "B_2-0": f"{teamB} 2-0"}
-                        forced_outcomes[match_key] = st.radio(f"**{teamA} vs {teamB}** ({date})", options=outcomes.keys(), format_func=lambda x: outcomes[x], horizontal=True, key=match_key)
-    else:
-        st.info("All regular season matches up to the selected cutoff have been played.")
-
-    st.markdown("---")
-
-    # --- 5. Run Simulation and Display Results (Now fully interactive) ---
-    brackets = [
-        {"start": 1, "end": 2, "name": "Upper Bracket"},
-        {"start": 3, "end": 6, "name": "Lower Bracket"},
-        {"start": 7, "end": None, "name": "Eliminated"}
-    ]
-    hashable_brackets = tuple(tuple(b.items()) for b in brackets)
-
-    df_probs = run_monte_carlo_sim(
-        _teams=tuple(teams), 
-        _wins_tuple=tuple(sorted(current_wins.items())),
-        _diff_tuple=tuple(sorted(current_diff.items())),
-        _unplayed_matches=tuple(unplayed), 
-        _forced_outcomes_tuple=tuple(sorted(forced_outcomes.items())),
-        _hashable_brackets=hashable_brackets, 
-        n_sim=20000
     )
     
     standings_df = build_standings_table(teams, played)
@@ -1296,6 +1197,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
