@@ -977,31 +977,45 @@ def build_standings_table(teams, played_matches):
 
 def create_bracket_config_ui(tournament_name):
     st.subheader("⚙️ Configure Playoff Brackets")
-    # <<< FIX: Updated the default bracket configuration to be more descriptive
+    
     default_brackets = [
         {"start": 1, "end": 2, "name": "Upper Bracket"},
         {"start": 3, "end": 6, "name": "Lower Bracket"},
         {"start": 7, "end": None, "name": "Eliminated"}
     ]
+    
     if 'bracket_config' not in st.session_state:
         st.session_state.bracket_config = load_config(tournament_name, 'bracket', default=default_brackets)
     
-    # The rest of the function remains the same...
+    # UI to edit the brackets
     for i, bracket in enumerate(st.session_state.bracket_config):
-        c1, c2, c3, c4 = st.columns([2,1,1,1])
-        bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}")
-        bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}")
+        st.markdown(f"**Bracket {i+1}**")
+        c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+        bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}", label_visibility="collapsed")
+        bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}", label_visibility="collapsed")
         end_val = bracket['end'] if bracket['end'] is not None else 0
-        new_end = c3.number_input("End Rank (0 for last)", value=end_val, min_value=0, key=f"br_end_{i}")
+        new_end = c3.number_input("End Rank (0 for last)", value=end_val, min_value=0, key=f"br_end_{i}", label_visibility="collapsed")
         bracket['end'] = new_end if new_end > 0 else None
-        if c4.button("❌", key=f"br_del_{i}"):
-            st.session_state.bracket_config.pop(i); st.rerun()
+        if c4.button("❌", key=f"br_del_{i}", help="Delete this bracket"):
+            st.session_state.bracket_config.pop(i)
+            st.rerun()
 
-    if st.button("➕ Add Bracket"):
+    st.markdown("---")
+    
+    # Action buttons
+    c1, c2, c3 = st.columns(3)
+    if c1.button("➕ Add Bracket", use_container_width=True):
         st.session_state.bracket_config.append({"start": 0, "end": 0, "name": "New Bracket"})
         st.rerun()
 
-    if st.button("💾 Save Bracket Configuration", type="primary"):
+    # <<< FIX: Add a button to reset the configuration to the correct default
+    if c2.button("🔄 Reset to Default", use_container_width=True):
+        st.session_state.bracket_config = default_brackets
+        save_config(tournament_name, 'bracket', st.session_state.bracket_config)
+        st.toast("Brackets reset to default!")
+        st.rerun()
+
+    if c3.button("💾 Save Configuration", type="primary", use_container_width=True):
         save_config(tournament_name, 'bracket', st.session_state.bracket_config)
         st.success("Bracket configuration saved!")
 
@@ -1135,6 +1149,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
