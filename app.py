@@ -967,15 +967,15 @@ def create_bracket_config_ui(tournament_name):
         {"start": 7, "end": None, "name": "Eliminated"}
     ]
     
-    # <<< FIX: Initialize the config in the session state ONCE with the correct default. No more file loading.
     if 'bracket_config' not in st.session_state:
+        # This logic correctly initializes the session state without using the deleted file-based config
         st.session_state.bracket_config = default_brackets
     
     # The UI now directly edits the session state
     for i, bracket in enumerate(st.session_state.bracket_config):
         st.markdown(f"**Bracket {i+1}**")
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        # The key for each widget must be unique
+        # The key for each widget must be unique, adding tournament_name makes it robust
         bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}_{tournament_name}", label_visibility="collapsed")
         bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}_{tournament_name}", label_visibility="collapsed")
         end_val = bracket['end'] if bracket['end'] is not None else 0
@@ -987,15 +987,20 @@ def create_bracket_config_ui(tournament_name):
 
     st.markdown("---")
     
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     if c1.button("➕ Add Bracket", use_container_width=True):
-        st.session_state.bracket_config.append({"start": 0, "end": 0, "name": "New Bracket"})
+        # <<< FIX: Changed the default "start" value from 0 to 1
+        st.session_state.bracket_config.append({"start": 1, "end": 1, "name": "New Bracket"})
         st.rerun()
 
     if c2.button("🔄 Reset to Default", use_container_width=True):
         st.session_state.bracket_config = default_brackets
         st.toast("Brackets reset to default!")
         st.rerun()
+
+    if c3.button("💾 Save (Session Only)", use_container_width=True, help="This saves the config for your current session."):
+        # This button might not be needed but can provide user feedback
+        st.success("Bracket configuration updated for this session!")
 
 
 # =============================================================================
@@ -1127,6 +1132,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
