@@ -864,23 +864,15 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     st.markdown("---")
     
-    # <<< FIX: Added a debug view to inspect the inputs to the simulation
-    with st.expander("🕵️ Debug View"):
-        st.write("**Data being sent to the simulation:**")
-        st.json({
-            "Cutoff Date": str(cutoff_date),
-            "Number of Unplayed Matches": len(unplayed),
-            "Current Wins (Sample)": dict(list(current_wins.items())[:3])
-        })
-
     hashable_brackets = tuple(tuple(b.items()) for b in brackets)
     
+    # <<< FIX: Convert dictionaries to a stable, hashable format (sorted tuples) before caching
     df_probs = run_monte_carlo_sim(
         _teams=tuple(teams), 
-        _current_wins=current_wins, 
-        _current_diff=current_diff, 
+        _wins_tuple=tuple(sorted(current_wins.items())),
+        _diff_tuple=tuple(sorted(current_diff.items())),
         _unplayed_matches=tuple(unplayed), 
-        _forced_outcomes=forced_outcomes, 
+        _forced_outcomes_tuple=tuple(sorted(forced_outcomes.items())),
         _hashable_brackets=hashable_brackets, 
         n_sim=n_sims
     )
@@ -957,7 +949,13 @@ def get_series_outcome_options(teamA, teamB, bo:int):
     return opts
 
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
-def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
+# <<< FIX: The function now accepts hashable tuples instead of dictionaries
+def run_monte_carlo_sim(_teams, _wins_tuple, _diff_tuple, _unplayed_matches, _forced_outcomes_tuple, _hashable_brackets, n_sim=10000):
+    # <<< FIX: Convert the tuples back into dictionaries for use in the function
+    _current_wins = dict(_wins_tuple)
+    _current_diff = dict(_diff_tuple)
+    _forced_outcomes = dict(_forced_outcomes_tuple)
+    
     _brackets = [dict(b) for b in _hashable_brackets]
     finish_counter = {t: {b["name"]: 0 for b in _brackets} for t in _teams}
     
@@ -967,7 +965,6 @@ def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches,
         for a, b, dt, bo in _unplayed_matches:
             code = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
 
-            # <<< FIX: This is the original, correct logic from your notebook >>>
             if code == "random":
                 options = [c for (_,c) in get_series_outcome_options(a,b,bo) if c != "random"]
                 if not options: continue
@@ -976,12 +973,10 @@ def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches,
                 outcome = code
 
             if outcome.startswith("A"):
-                winner, loser = a, b
-                scores = outcome.split('_')[1]
+                winner, loser, scores = a, b, outcome.split('_')[1]
             elif outcome.startswith("B"):
-                winner, loser = b, a
-                scores = outcome.split('_')[1]
-            else: # Should not happen with the radio button logic
+                winner, loser, scores = b, a, outcome.split('_')[1]
+            else:
                 continue
             
             w, l = map(int, scores.split('-'))
@@ -1000,7 +995,7 @@ def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches,
                     
     prob_data = [{"Team": t, **{f"{b['name']} (%)": finish_counter[t][b["name"]] / n_sim * 100 for b in _brackets}} for t in _teams]
     return pd.DataFrame(prob_data).round(2)
-
+    
 @st.cache_data(show_spinner="Running Group Stage Monte Carlo simulation...")
 def monte_carlo_sim_groups(_groups, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
     _brackets = [dict(b) for b in _hashable_brackets]
@@ -1214,6 +1209,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
