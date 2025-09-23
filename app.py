@@ -768,27 +768,27 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
     """This function now acts as a router to guide the user through setup."""
     st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
     
-    # --- Step 1: Determine Tournament Format (Single Table vs Groups) ---
+    # <<< FIX: This block no longer calls the deleted `load_config` function.
+    # It now manages the tournament format entirely in the session state.
     format_key = f"format_{tournament_name}"
     if format_key not in st.session_state:
-        st.session_state[format_key] = load_config(tournament_name, 'format', default={'type': 'unknown'})['type']
+        st.session_state[format_key] = 'unknown' # Default to 'unknown' to trigger the question below.
 
+    # Step 1: If format is unknown, ask the user to set it.
     if st.session_state[format_key] == 'unknown':
         st.subheader("Tournament Format Setup")
-        st.info("First, please specify the format for this tournament. This is a one-time setup.")
+        st.info("First, please specify the format for this tournament. This is a one-time setup for your current session.")
         c1, c2 = st.columns(2)
         if c1.button("Single Table / League", use_container_width=True):
-            save_config(tournament_name, 'format', {'type': 'single'})
             st.session_state[format_key] = 'single'
             st.rerun()
         if c2.button("Group Stage", use_container_width=True):
             st.warning("Group Stage mode is a work in progress and may not be fully functional.")
-            save_config(tournament_name, 'format', {'type': 'groups'})
             st.session_state[format_key] = 'groups'
             st.rerun()
-        return
+        return # Stop further rendering until a format is chosen
 
-    # --- Step 2: Route to the correct dashboard ---
+    # Step 2: Route to the correct dashboard based on the format chosen.
     if st.session_state[format_key] == 'single':
         playoff_dashboard_single(matches_for_tournament, tournament_name)
     elif st.session_state[format_key] == 'groups':
@@ -1127,6 +1127,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
