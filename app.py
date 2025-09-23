@@ -922,23 +922,6 @@ def build_week_blocks(dates):
         else: blocks.append([curr])
     return blocks
 
-def get_config_cache_key(tournament_name, config_type):
-    return f".{config_type}_config_{tournament_name.replace(' ', '_')}.json"
-
-def load_config(tournament_name, config_type, default=None):
-    try:
-        cache_file = get_config_cache_key(tournament_name, config_type)
-        if os.path.exists(cache_file):
-            with open(cache_file, 'r') as f: return json.load(f)
-    except: pass
-    return default
-
-def save_config(tournament_name, config_type, config):
-    try:
-        with open(get_config_cache_key(tournament_name, config_type), 'w') as f: json.dump(config, f)
-        return True
-    except: return False
-
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
 def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
     _brackets = [dict(b) for b in _hashable_brackets]
@@ -984,54 +967,35 @@ def create_bracket_config_ui(tournament_name):
         {"start": 7, "end": None, "name": "Eliminated"}
     ]
     
-    # <<< FIX: This block now intelligently handles outdated config files
+    # <<< FIX: Initialize the config in the session state ONCE with the correct default. No more file loading.
     if 'bracket_config' not in st.session_state:
-        config_from_file = load_config(tournament_name, 'bracket')
-        
-        # Check if the loaded config is the old, simple version
-        is_outdated = False
-        if config_from_file and isinstance(config_from_file, list) and len(config_from_file) > 0:
-            # A simple heuristic: check if it contains the old "Playoffs" name
-            names = {b.get('name') for b in config_from_file}
-            if "Playoffs" in names:
-                is_outdated = True
-
-        # If the file is outdated or doesn't exist, load the new default. Otherwise, load the user's file.
-        if is_outdated or not config_from_file:
-            st.session_state.bracket_config = default_brackets
-            st.toast("Loaded default bracket configuration.")
-        else:
-            st.session_state.bracket_config = config_from_file
-            
-    # The rest of the UI logic remains the same
+        st.session_state.bracket_config = default_brackets
+    
+    # The UI now directly edits the session state
     for i, bracket in enumerate(st.session_state.bracket_config):
         st.markdown(f"**Bracket {i+1}**")
         c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-        bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}", label_visibility="collapsed")
-        bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}", label_visibility="collapsed")
+        # The key for each widget must be unique
+        bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}_{tournament_name}", label_visibility="collapsed")
+        bracket['start'] = c2.number_input("Start Rank", value=bracket['start'], min_value=1, key=f"br_start_{i}_{tournament_name}", label_visibility="collapsed")
         end_val = bracket['end'] if bracket['end'] is not None else 0
-        new_end = c3.number_input("End Rank (0 for last)", value=end_val, min_value=0, key=f"br_end_{i}", label_visibility="collapsed")
+        new_end = c3.number_input("End Rank (0 for last)", value=end_val, min_value=0, key=f"br_end_{i}_{tournament_name}", label_visibility="collapsed")
         bracket['end'] = new_end if new_end > 0 else None
-        if c4.button("❌", key=f"br_del_{i}", help="Delete this bracket"):
+        if c4.button("❌", key=f"br_del_{i}_{tournament_name}", help="Delete this bracket"):
             st.session_state.bracket_config.pop(i)
             st.rerun()
 
     st.markdown("---")
     
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns(2)
     if c1.button("➕ Add Bracket", use_container_width=True):
         st.session_state.bracket_config.append({"start": 0, "end": 0, "name": "New Bracket"})
         st.rerun()
 
     if c2.button("🔄 Reset to Default", use_container_width=True):
         st.session_state.bracket_config = default_brackets
-        save_config(tournament_name, 'bracket', st.session_state.bracket_config)
         st.toast("Brackets reset to default!")
         st.rerun()
-
-    if c3.button("💾 Save Configuration", type="primary", use_container_width=True):
-        save_config(tournament_name, 'bracket', st.session_state.bracket_config)
-        st.success("Bracket configuration saved!")
 
 
 # =============================================================================
@@ -1163,6 +1127,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
