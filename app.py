@@ -1097,71 +1097,84 @@ def main():
         if not selected_tournaments:
             st.sidebar.error("Please select at least one tournament.")
         else:
-            # <<< FIX: This block now populates a dictionary instead of a single list
-            with st.spinner(f"Loading data for {len(selected_tournaments)} tournament(s)..."):
-                matches_dict = {}
-                for name in selected_tournaments:
-                    path = all_tournaments[name]['path']
-                    data, error = load_tournament_matches(path)
-                    
-                    if error: st.warning(error)
-                    if data:
-                        matches_dict[name] = data
-                        st.toast(f"Loaded {len(data)} matches for {name}")
-                
-                st.session_state.matches_dict = matches_dict
-                st.session_state.tournaments_shown = selected_tournaments
-
+            st.session_state.selected_tournaments = selected_tournaments
             st.session_state.analysis_ready = True
             st.session_state.run_training = False
+            
+            # <<< FIX: Fully reset state for the new analysis run
+            st.session_state.tournaments_shown = [] 
+            st.session_state.run_sim = False
+            st.session_state.success_message_shown = False
+            st.session_state.toasts_shown = set()
 
     # Main display logic
     if st.session_state.get('analysis_ready', False):
         matches_dict = st.session_state.get('matches_dict', {})
         tournaments_shown = st.session_state.get('tournaments_shown', [])
 
+        # Load data only if the selection has changed
+        if tournaments_shown != st.session_state.get('selected_tournaments'):
+            with st.spinner(f"Loading data for {len(st.session_state.selected_tournaments)} tournament(s)..."):
+                new_matches_dict = {}
+                for name in st.session_state.selected_tournaments:
+                    path = all_tournaments[name]['path']
+                    data, error = load_tournament_matches(path)
+                    
+                    if error: st.warning(error)
+                    if data:
+                        new_matches_dict[name] = data
+                        if name not in st.session_state.toasts_shown:
+                            st.toast(f"Loaded {len(data)} matches for {name}")
+                            st.session_state.toasts_shown.add(name)
+                
+                st.session_state.matches_dict = new_matches_dict
+                st.session_state.tournaments_shown = st.session_state.selected_tournaments
+                if not new_matches_dict:
+                    st.session_state.analysis_ready = False
+
+        # Re-fetch from state after potential update
+        matches_dict = st.session_state.get('matches_dict', {})
+        tournaments_shown = st.session_state.get('tournaments_shown', [])
+
         if not matches_dict:
             st.error("Could not load any match data for the selected tournaments.")
         else:
-            # <<< FIX: Modes that need combined data will create a pool.
-            # Modes that need specific data will select from the dictionary.
-            if mode in ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head', 'Synergy & Counter Analysis', 'Drafting Assistant']:
-                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
-                
-                if mode == 'Statistics breakdown':
-                    build_statistics_breakdown(pooled_matches, tournaments_shown)
-                elif mode == 'Hero detail drilldown':
-                    build_hero_drilldown_ui(pooled_matches, tournaments_shown)
-                elif mode == 'Head-to-head':
-                    build_head_to_head_dashboard(pooled_matches, tournaments_shown)
-                elif mode == 'Synergy & Counter Analysis':
-                    build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
-                elif mode == 'Drafting Assistant':
-                    build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
+            if not st.session_state.get('success_message_shown', False):
+                 st.success(f"Successfully loaded data for {len(tournaments_shown)} tournament(s).")
+                 st.session_state.success_message_shown = True
 
+            if mode == 'Statistics breakdown':
+                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+                build_statistics_breakdown(pooled_matches, tournaments_shown)
+            elif mode == 'Hero detail drilldown':
+                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+                build_hero_drilldown_ui(pooled_matches, tournaments_shown)
+            elif mode == 'Head-to-head':
+                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+                build_head_to_head_dashboard(pooled_matches, tournaments_shown)
+            elif mode == 'Synergy & Counter Analysis':
+                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+                build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
             elif mode == 'Playoff Qualification Odds (What-If Scenario)':
                 if len(tournaments_shown) > 1:
                     st.warning("⚠️ Please select only ONE tournament for Playoff Odds analysis.")
                 elif len(tournaments_shown) == 1:
                     tournament_name = tournaments_shown[0]
-                    # <<< FIX: Pass only the data for the selected tournament
                     matches_for_single_tournament = matches_dict.get(tournament_name, [])
                     build_playoff_qualification_ui(matches_for_single_tournament, tournament_name)
                 else:
                     st.error("No tournament selected for Playoff Odds analysis.")
+            elif mode == 'Drafting Assistant':
+                pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
+                build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
 
     elif st.session_state.get('run_training', False):
-        # Placeholder for training logic
-        st.info("Training mode activated.")
         pass
     else:
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
         st.markdown("Please select a mode and at least one tournament from the sidebar, then click **'Analyze'**.")
 
-
 if __name__ == "__main__":
-    if 'analysis_ready' not in st.session_state:
-        st.session_state.analysis_ready = False
     if 'tournament_selections' not in st.session_state:
         all_tournaments = {**archived_tournaments, **live_tournaments}
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
