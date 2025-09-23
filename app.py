@@ -866,7 +866,6 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
     
     hashable_brackets = tuple(tuple(b.items()) for b in brackets)
     
-    # <<< FIX: Convert dictionaries to a stable, hashable format (sorted tuples) before caching
     df_probs = run_monte_carlo_sim(
         _teams=tuple(teams), 
         _wins_tuple=tuple(sorted(current_wins.items())),
@@ -877,8 +876,15 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         n_sim=n_sims
     )
     
+    # Generate standings table first to get the correct order
     standings_df = build_standings_table(teams, played)
     
+    # <<< FIX: Re-order the probabilities table to match the standings table
+    if not df_probs.empty and not standings_df.empty:
+        team_order = standings_df['Team'].tolist()
+        # Use set_index and reindex to sort df_probs according to team_order
+        df_probs = df_probs.set_index('Team').reindex(team_order).reset_index()
+
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Qualification Probabilities")
@@ -1209,6 +1215,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
