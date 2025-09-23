@@ -858,11 +858,16 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
         st.session_state.run_sim = True
         st.session_state.forced_outcomes_for_run = forced_outcomes.copy()
 
+    # Location: Inside the `build_playoff_qualification_ui` function
+
     if st.session_state.get('run_sim', False):
+        # <<< FIX: Convert the list of dictionaries into a hashable format (tuple of tuples)
+        hashable_brackets = tuple(tuple(b.items()) for b in brackets)
+
         df_probs = run_monte_carlo_sim(
             tuple(teams), current_wins, current_diff, 
             tuple(unplayed), st.session_state.forced_outcomes_for_run, 
-            tuple(str(b) for b in brackets) # Convert list of dicts to something hashable
+            hashable_brackets # <<< FIX: Pass the new hashable variable
         )
         
         standings_df = build_standings_table(teams, played)
@@ -941,8 +946,14 @@ def save_config(tournament_name, config_type, config):
         return False
 
 # --- Monte Carlo Simulations (Cached for performance) ---
+# Location: In the "Helper Functions for Playoff Qualification Odds" section
+
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
-def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _brackets, n_sim=10000):
+# <<< FIX: The last argument is renamed to reflect its hashable format
+def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
+    # <<< FIX: Reconstruct the list of dictionaries from the hashable input
+    _brackets = [dict(b) for b in _hashable_brackets]
+    
     finish_counter = {t: {b["name"]: 0 for b in _brackets} for t in _teams}
     
     for _ in range(n_sim):
@@ -952,7 +963,6 @@ def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches,
         for a, b, dt, bo in _unplayed_matches:
             outcome = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
             if outcome == "random":
-                # Simplified random outcome
                 winner, loser = (a, b) if random.random() > 0.5 else (b, a)
                 w, l = (2, 1) if bo == 3 and random.random() > 0.5 else (2,0) if bo == 3 else (1,0)
             else:
@@ -1145,6 +1155,7 @@ if __name__ == "__main__":
             st.session_state[key] = default_value
     
     main()
+
 
 
 
