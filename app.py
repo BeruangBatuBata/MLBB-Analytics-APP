@@ -458,32 +458,140 @@ def build_head_to_head_dashboard(pooled_matches, tournaments_shown):
 
     team_norm2disp = {opp.get("name", "").strip().lower(): opp.get("name", "").strip() for match in pooled_matches for opp in match.get("match2opponents", []) if opp.get("name", "").strip()}
     all_heroes = sorted(list(set(p["champion"] for m in pooled_matches for g in m.get("match2games", []) for o in g.get("opponents", []) for p in o.get("players", []) if isinstance(p, dict) and "champion" in p)))
-    team_options = sorted([(name, norm) for norm, name in team_norm2disp.items()])
+    team_options = sorted([(name, norm) for norm, name in team_norm2disp.items() if norm])
 
-    mode = st.radio("Comparison Mode:", ["Team vs Team", "Hero vs Hero"], horizontal=True)
+    mode = st.radio("Comparison Mode:", ["Team vs Team", "Hero vs Hero"], horizontal=True, label_visibility="collapsed")
     
+    st.markdown("---")
+
     if mode == "Team vs Team":
+        if not team_options:
+            st.warning("No team data available for the selected tournaments.")
+            return
+            
         col1, col2 = st.columns(2)
         t1 = col1.selectbox("Select Team 1:", options=team_options, format_func=lambda x: x[0])[1]
         t2 = col2.selectbox("Select Team 2:", options=team_options, format_func=lambda x: x[0], index=1 if len(team_options)>1 else 0)[1]
         
-        if st.button("Compare Teams"):
-            if t1 == t2: st.error("Please select two different teams.")
-            else: do_team_h2h(t1, t2, pooled_matches, team_norm2disp)
-    else:
+        if st.button("Compare Teams", use_container_width=True):
+            if t1 == t2: 
+                st.error("Please select two different teams.")
+            else: 
+                do_team_h2h(t1, t2, pooled_matches, team_norm2disp)
+    else: # Hero vs Hero
+        if not all_heroes:
+            st.warning("No hero data available for the selected tournaments.")
+            return
+
         col1, col2 = st.columns(2)
         h1 = col1.selectbox("Select Hero 1:", options=all_heroes)
         h2 = col2.selectbox("Select Hero 2:", options=all_heroes, index=1 if len(all_heroes)>1 else 0)
 
-        if st.button("Compare Heroes"):
-            if h1 == h2: st.error("Please select two different heroes.")
-            else: do_hero_h2h(h1, h2, pooled_matches)
+        if st.button("Compare Heroes", use_container_width=True):
+            if h1 == h2: 
+                st.error("Please select two different heroes.")
+            else: 
+                do_hero_h2h(h1, h2, pooled_matches)
 
 def do_team_h2h(t1, t2, pooled_matches, team_norm2disp):
-    st.info("Team H2H analysis logic would run here.")
+    """Calculates and displays the Team vs Team head-to-head statistics."""
+    h2h_matches = []
+    for match in pooled_matches:
+        opps = [x.get("name","").strip().lower() for x in match.get("match2opponents",[])]
+        if t1 in opps and t2 in opps:
+            h2h_matches.append(match)
+    
+    if not h2h_matches:
+        st.warning(f"No matches found between {team_norm2disp[t1]} and {team_norm2disp[t2]}.")
+        return
+
+    win_counts = {t1: 0, t2: 0}
+    total_games = 0
+    t1_heroes, t2_heroes = Counter(), Counter()
+    t1_bans, t2_bans = Counter(), Counter()
+
+    for match in h2h_matches:
+        opps = [x.get("name","").strip().lower() for x in match.get("match2opponents",[])]
+        try:
+            idx1, idx2 = opps.index(t1), opps.index(t2)
+        except ValueError:
+            continue
+        
+        for game in match.get("match2games", []):
+            winner = str(game.get("winner",""))
+            if winner.isdigit():
+                match_winner_idx = int(winner) - 1
+                if 0 <= match_winner_idx < len(opps):
+                    winner_team = opps[match_winner_idx]
+                    if winner_team in win_counts:
+                        win_counts[winner_team] += 1
+                total_games += 1
+
+            extrad = game.get("extradata", {})
+            opponents = game.get("opponents", [])
+            if len(opponents)<2: continue
+
+            for i, opp in enumerate(opponents):
+                hero_set = set(p["champion"] for p in opp.get("players",[]) if isinstance(p, dict) and "champion" in p)
+                if i == idx1: t1_heroes.update(hero_set)
+                elif i == idx2: t2_heroes.update(hero_set)
+            
+            for i, team_idx in enumerate([idx1, idx2]):
+                for ban_n in range(1,6):
+                    ban_hero = extrad.get(f"team{team_idx+1}ban{ban_n}")
+                    if ban_hero:
+                        if i == 0: t1_bans[ban_hero] += 1
+                        else: t2_bans[ban_hero] += 1
+
+    st.subheader(f"{team_norm2disp[t1]} vs {team_norm2disp[t2]}")
+    st.markdown(f"""
+    - **Total Games:** {total_games}
+    - **{team_norm2disp[t1]} Wins:** `{win_counts[t1]}`
+    - **{team_norm2disp[t2]} Wins:** `{win_counts[t2]}`
+    """)
+
+    tbl_A = pd.DataFrame(t1_heroes.most_common(8), columns=['Hero', 'Picks'])
+    tbl_B = pd.DataFrame(t2_heroes.most_common(8), columns=['Hero', 'Picks'])
+    render_paired_tables(
+        f"Top picks by {team_norm2disp[t1]}<br><span style='font-weight:normal'>(vs {team_norm2disp[t2]})</span>", tbl_A,
+        f"Top picks by {team_norm2disp[t2]}<br><span style='font-weight:normal'>(vs {team_norm2disp[t1]})</span>", tbl_B
+    )
+    
+    st.markdown("<div style='height:20px;'></div>", unsafe_allow_html=True)
+
+    ban_tbl_A = pd.DataFrame(t1_bans.most_common(8), columns=['Hero', 'Bans'])
+    ban_tbl_B = pd.DataFrame(t2_bans.most_common(8), columns=['Hero', 'Bans'])
+    render_paired_tables(
+        f"Target bans by {team_norm2disp[t1]}<br><span style='font-weight:normal'>(vs {team_norm2disp[t2]})</span>", ban_tbl_A,
+        f"Target bans by {team_norm2disp[t2]}<br><span style='font-weight:normal'>(vs {team_norm2disp[t1]})</span>", ban_tbl_B
+    )
 
 def do_hero_h2h(h1, h2, pooled_matches):
-    st.info("Hero H2H analysis logic would run here.")
+    """Calculates and displays the Hero vs Hero head-to-head statistics."""
+    win_h1 = win_h2 = 0
+    total_games = 0
+    for match in pooled_matches:
+        for game in match.get("match2games", []):
+            opp_heroes = []
+            for opp in game.get("opponents", []):
+                opp_heroes.append(set(p["champion"] for p in opp.get("players",[]) if isinstance(p, dict) and "champion" in p))
+            if len(opp_heroes) != 2: continue
+            side1, side2 = opp_heroes
+            if (h1 in side1 and h2 in side2) or (h2 in side1 and h1 in side2):
+                total_games += 1
+                winner = str(game.get("winner",""))
+                if (h1 in side1 and winner=="1") or (h1 in side2 and winner=="2"): win_h1 += 1
+                if (h2 in side1 and winner=="1") or (h2 in side2 and winner=="2"): win_h2 += 1
+    
+    st.subheader(f"{h1} vs {h2}")
+    if total_games > 0:
+        st.markdown(f"""
+        - **Games with both on opposite teams:** {total_games}
+        - **{h1} wins:** `{win_h1}` (`{(win_h1/total_games*100):.1f}%`)
+        - **{h2} wins:** `{win_h2}` (`{(win_h2/total_games*100):.1f}%`)
+        """)
+    else:
+        st.warning(f"No games found where {h1} and {h2} were on opposing teams.")
 
 def build_synergy_counter_dashboard(pooled_matches, tournaments_shown):
     st.header("Synergy & Counter Analysis")
@@ -637,3 +745,4 @@ if __name__ == "__main__":
             st.session_state[key] = default_value
     
     main()
+
