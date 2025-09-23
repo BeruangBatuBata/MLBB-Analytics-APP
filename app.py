@@ -864,7 +864,15 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     st.markdown("---")
     
-    # <<< FIX: The "Run" button is removed. This section now runs on every interaction.
+    # <<< FIX: Added a debug view to inspect the inputs to the simulation
+    with st.expander("🕵️ Debug View"):
+        st.write("**Data being sent to the simulation:**")
+        st.json({
+            "Cutoff Date": str(cutoff_date),
+            "Number of Unplayed Matches": len(unplayed),
+            "Current Wins (Sample)": dict(list(current_wins.items())[:3])
+        })
+
     hashable_brackets = tuple(tuple(b.items()) for b in brackets)
     
     df_probs = run_monte_carlo_sim(
@@ -1206,6 +1214,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
