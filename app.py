@@ -811,11 +811,12 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
 
 
 def playoff_dashboard_single(matches_for_tournament, tournament_name):
-    # ... (The first part of the function remains the same)
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
+    
     if not regular_season_matches:
         st.warning("No regular season matches found for this tournament."); return
+        
     teams = sorted(list(set(m['teamA'] for m in regular_season_matches) | set(m['teamB'] for m in regular_season_matches)))
     all_dates = sorted(list(set(m['date'] for m in regular_season_matches)))
     week_blocks = build_week_blocks(all_dates)
@@ -825,12 +826,15 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000, key=f"n_sims_{tournament_name}")
 
     brackets = st.session_state.bracket_config
+    
     week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
     week_options[-1] = "Pre-Season (0 matches played)"
+    
     if not week_options: st.warning("No match dates found."); return
 
     last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
     default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
+    
     cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=default_week_idx)
 
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
@@ -845,7 +849,6 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
             unplayed.append((m['teamA'], m['teamB'], m['date'], m['bestof']))
 
     st.subheader("🔮 What-If Scenarios for Upcoming Matches")
-    # ... (What-If Scenarios logic remains the same)
     forced_outcomes = {}
     if unplayed:
         for week_idx, week_dates in enumerate(week_blocks):
@@ -858,6 +861,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
                         forced_outcomes[match_key] = st.radio(f"**{teamA} vs {teamB}** ({date})", options=outcomes.keys(), format_func=lambda x: outcomes[x], horizontal=True, key=match_key)
     else:
         st.info("All regular season matches up to the selected cutoff have been played.")
+
     st.markdown("---")
     
     # --- Data Generation and Sorting Logic ---
@@ -872,31 +876,18 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         n_sim=n_sims
     )
     
-    # Create a copy for debugging before attempting to sort
-    df_probs_before_sort = df_probs.copy()
-    team_order = [] # Initialize team_order
-
     if not standings_df.empty:
         standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
-        team_order = standings_df['Team'].tolist()
     
-    if not df_probs.empty and team_order:
+    if not df_probs.empty and not standings_df.empty:
+        team_order = standings_df['Team'].tolist()
         try:
-            df_probs = df_probs.set_index("Team").reindex(team_order).reset_index()
+            # <<< FIX: Using a more robust sorting method (pandas.Categorical)
+            df_probs['Team'] = pd.Categorical(df_probs['Team'], categories=team_order, ordered=True)
+            df_probs = df_probs.sort_values('Team')
             df_probs.insert(0, "Rank", range(1, len(df_probs) + 1))
         except Exception as e:
             st.error(f"An error occurred during sorting: {e}")
-
-    # <<< FIX: Add a debug view to inspect the data and sorting order
-    with st.expander("🕵️ Sort Debug View"):
-        st.write("**This is the team order the app is trying to use for sorting:**")
-        st.json(team_order)
-        
-        st.write("**This is the Probabilities table BEFORE sorting:**")
-        st.dataframe(df_probs_before_sort, use_container_width=True)
-        
-        st.write("**This is the Probabilities table AFTER attempting to sort:**")
-        st.dataframe(df_probs, use_container_width=True)
 
     # --- Display Logic ---
     col1, col2 = st.columns(2)
@@ -1236,6 +1227,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
