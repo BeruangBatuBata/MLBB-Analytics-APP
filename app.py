@@ -811,7 +811,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     with st.expander("⚙️ Configure Brackets & Settings"):
         create_bracket_config_ui(tournament_name)
-        st.session_state.n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000)
+        st.session_state.n_sims = st.slider("Number of Simulations", 1000, 50000, 50000, step=1000)
 
     brackets = st.session_state.bracket_config
     
@@ -1113,6 +1113,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
