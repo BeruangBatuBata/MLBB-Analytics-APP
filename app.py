@@ -811,12 +811,11 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
 
 
 def playoff_dashboard_single(matches_for_tournament, tournament_name):
+    # ... (The first part of the function remains the same)
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
-    
     if not regular_season_matches:
         st.warning("No regular season matches found for this tournament."); return
-        
     teams = sorted(list(set(m['teamA'] for m in regular_season_matches) | set(m['teamB'] for m in regular_season_matches)))
     all_dates = sorted(list(set(m['date'] for m in regular_season_matches)))
     week_blocks = build_week_blocks(all_dates)
@@ -826,15 +825,12 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000, key=f"n_sims_{tournament_name}")
 
     brackets = st.session_state.bracket_config
-    
     week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
     week_options[-1] = "Pre-Season (0 matches played)"
-    
     if not week_options: st.warning("No match dates found."); return
 
     last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
     default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
-    
     cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=default_week_idx)
 
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
@@ -864,35 +860,39 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     st.markdown("---")
     
-    hashable_brackets = tuple(tuple(b.items()) for b in brackets)
+    # <<< FIX: This entire final block is updated to match the notebook's sorting and ranking logic >>>
     
+    # 1. Generate the two tables
+    standings_df = build_standings_table(teams, played)
     df_probs = run_monte_carlo_sim(
         _teams=tuple(teams), 
         _wins_tuple=tuple(sorted(current_wins.items())),
         _diff_tuple=tuple(sorted(current_diff.items())),
         _unplayed_matches=tuple(unplayed), 
         _forced_outcomes_tuple=tuple(sorted(forced_outcomes.items())),
-        _hashable_brackets=hashable_brackets, 
+        _hashable_brackets=tuple(tuple(b.items()) for b in brackets), 
         n_sim=n_sims
     )
     
-    # Generate standings table first to get the correct order
-    standings_df = build_standings_table(teams, played)
+    # 2. Add Rank to standings table
+    if not standings_df.empty:
+        standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
     
-    # <<< FIX: Re-order the probabilities table to match the standings table
+    # 3. Sort the probabilities table using the standings order and add Rank
     if not df_probs.empty and not standings_df.empty:
-        team_order = standings_df['Team'].tolist()
-        # Use set_index and reindex to sort df_probs according to team_order
-        df_probs = df_probs.set_index('Team').reindex(team_order).reset_index()
+        # Use .loc for robust re-ordering based on the 'Team' column from standings_df
+        df_probs = df_probs.set_index("Team").loc[standings_df["Team"]].reset_index()
+        df_probs.insert(0, "Rank", range(1, len(df_probs) + 1))
 
+    # 4. Display the final, sorted tables
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Qualification Probabilities")
-        st.dataframe(df_probs, use_container_width=True)
+        st.dataframe(df_probs, use_container_width=True, hide_index=True)
         offer_csv_download_button(df_probs, "playoff_probabilities.csv")
     with col2:
         st.subheader("Current Standings (Up to Cutoff)")
-        st.dataframe(standings_df, use_container_width=True)
+        st.dataframe(standings_df, use_container_width=True, hide_index=True)
             
 def build_enhanced_draft_assistant_ui(*args, **kwargs):
     st.header("Drafting Assistant")
@@ -1056,9 +1056,15 @@ def build_standings_table(teams, played_matches):
         stats[a]['gw'] += m["scoreA"]; stats[a]['gl'] += m["scoreB"]; stats[b]['gw'] += m["scoreB"]; stats[b]['gl'] += m["scoreA"]
         if m["winner"] == "1": stats[a]['mw'] += 1; stats[b]['ml'] += 1
         elif m["winner"] == "2": stats[b]['mw'] += 1; stats[a]['ml'] += 1
+    
     standings = [{"Team": t, "Match W-L": f"{s['mw']}-{s['ml']}", "Game W-L": f"{s['gw']}-{s['gl']}", "Diff": s['gw'] - s['gl'], "_sort_mw": s['mw']} for t, s in stats.items()]
     df = pd.DataFrame(standings)
-    return df.sort_values(by=["_sort_mw", "Diff"], ascending=False).drop(columns=["_sort_mw"]) if not df.empty else df
+    
+    if not df.empty:
+        df = df.sort_values(by=["_sort_mw", "Diff"], ascending=False).drop(columns=["_sort_mw"])
+        # <<< FIX: Added reset_index to ensure a clean 0-based index after sorting
+        df = df.reset_index(drop=True)
+    return df
 
 def create_bracket_config_ui(tournament_name):
     st.subheader("⚙️ Configure Playoff Brackets")
@@ -1215,6 +1221,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
