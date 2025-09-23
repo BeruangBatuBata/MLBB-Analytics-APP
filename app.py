@@ -922,27 +922,63 @@ def build_week_blocks(dates):
         else: blocks.append([curr])
     return blocks
 
+# Location: Add this to the "Helper Functions for Playoff Qualification Odds" section
+
+def get_series_outcome_options(teamA, teamB, bo:int):
+    """Generates a list of all possible score outcomes for a series."""
+    opts=[("Random","random")]
+    if bo==3:
+        opts+=[(f"{teamA} 2–0","A_2-0"),(f"{teamA} 2–1","A_2-1"),
+               (f"{teamB} 2–1","B_2-1"),(f"{teamB} 2–0","B_2-0")]
+    elif bo==5:
+        opts+=[(f"{teamA} 3–0","A_3-0"),(f"{teamA} 3–1","A_3-1"),(f"{teamA} 3–2","A_3-2"),
+               (f"{teamB} 3–2","B_3-2"),(f"{teamB} 3–1","B_3-1"),(f"{teamB} 3–0","B_3-0")]
+    else: # Default to Best-of-1 logic
+        opts+=[(f"{teamA} Win","A_1-0"), (f"{teamB} Win","B_1-0")]
+    return opts
+
 @st.cache_data(show_spinner="Running Monte Carlo simulation...")
 def run_monte_carlo_sim(_teams, _current_wins, _current_diff, _unplayed_matches, _forced_outcomes, _hashable_brackets, n_sim=10000):
     _brackets = [dict(b) for b in _hashable_brackets]
     finish_counter = {t: {b["name"]: 0 for b in _brackets} for t in _teams}
+    
     for _ in range(n_sim):
         sim_wins, sim_diff = _current_wins.copy(), _current_diff.copy()
+        
         for a, b, dt, bo in _unplayed_matches:
-            outcome = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
-            if outcome == "random":
-                winner, loser = (a, b) if random.random() > 0.5 else (b, a)
-                w, l = (2, 1) if bo == 3 and random.random() > 0.5 else (2,0) if bo == 3 else (1,0)
+            code = _forced_outcomes.get(f"{a}|{b}|{dt}", "random")
+
+            # <<< FIX: This is the original, correct logic from your notebook >>>
+            if code == "random":
+                options = [c for (_,c) in get_series_outcome_options(a,b,bo) if c != "random"]
+                if not options: continue
+                outcome = random.choice(options)
             else:
-                winner_char, scores = outcome.split("_"); w, l = map(int, scores.split('-'))
-                winner, loser = (a, b) if winner_char == 'A' else (b, a)
-            sim_wins[winner] += 1; sim_diff[winner] += w - l; sim_diff[loser] += l - w
+                outcome = code
+
+            if outcome.startswith("A"):
+                winner, loser = a, b
+                scores = outcome.split('_')[1]
+            elif outcome.startswith("B"):
+                winner, loser = b, a
+                scores = outcome.split('_')[1]
+            else: # Should not happen with the radio button logic
+                continue
+            
+            w, l = map(int, scores.split('-'))
+            
+            sim_wins[winner] += 1
+            sim_diff[winner] += w - l
+            sim_diff[loser] += l - w
+        
         ranked = sorted(_teams, key=lambda t: (sim_wins[t], sim_diff[t], random.random()), reverse=True)
         for pos, t in enumerate(ranked):
             rank = pos + 1
             for bracket in _brackets:
                 if bracket["start"] <= rank <= (bracket["end"] if bracket["end"] is not None else 999):
-                    finish_counter[t][bracket["name"]] += 1; break
+                    finish_counter[t][bracket["name"]] += 1
+                    break
+                    
     prob_data = [{"Team": t, **{f"{b['name']} (%)": finish_counter[t][b["name"]] / n_sim * 100 for b in _brackets}} for t in _teams]
     return pd.DataFrame(prob_data).round(2)
 
@@ -1113,6 +1149,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
