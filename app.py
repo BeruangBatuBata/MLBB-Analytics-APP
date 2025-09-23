@@ -596,7 +596,173 @@ def do_hero_h2h(h1, h2, pooled_matches):
 def build_synergy_counter_dashboard(pooled_matches, tournaments_shown):
     st.header("Synergy & Counter Analysis")
     st.info(f"**Tournaments:** {', '.join(tournaments_shown)}")
-    st.info("Synergy & Counter logic would be implemented here using Streamlit widgets.")
+
+    team_norm2disp = {opp.get("name", "").strip().lower(): opp.get("name", "").strip() for match in pooled_matches for opp in match.get("match2opponents", []) if opp.get("name", "").strip()}
+    teams = sorted(team_norm2disp.keys())
+    team_options = [("All Teams", "all")] + [(name, norm) for norm, name in team_norm2disp.items() if norm]
+    all_heroes = sorted(list(set(p["champion"] for match in pooled_matches for game in match.get("match2games", []) for opp in game.get("opponents", []) for p in opp.get("players", []) if isinstance(p, dict) and "champion" in p)))
+
+    c1, c2, c3 = st.columns(3)
+    team_filter = c1.selectbox("Team:", options=team_options, format_func=lambda x: x[0])[1]
+    mode = c2.selectbox("Mode:", options=[("Synergy Combos", "synergy"), ("Anti-Synergy Combos", "anti"), ("Counter Combos", "counter")], format_func=lambda x: x[0])[1]
+    top_n = c3.slider("Show Top N:", 3, 50, 15)
+    min_games = c3.slider("Min Games Played:", 1, 20, 3)
+
+    st.markdown("---")
+
+    if mode in ("synergy", "anti"):
+        focus_hero = st.selectbox("Filter by Hero (Optional):", options=["(Show All)"] + all_heroes)
+        df = analyze_synergy(tuple(pooled_matches), team_filter, min_games, anti=(mode=="anti"), focus_hero=focus_hero)
+        if not df.empty:
+            df_display = df.head(top_n)
+            render_strictly_sticky_table(df_display)
+            offer_csv_download_button(df_display, "synergy_data.csv")
+            
+            title = "Top Performing Hero Duos" if mode == "synergy" else "Worst Performing Hero Duos"
+            if focus_hero != "(Show All)":
+                title += f" with {focus_hero}"
+            
+            plot_synergy_bar(df_display.sort_values("Win Rate (%)", ascending=(mode=="anti")), title, focus_hero)
+        else:
+            st.warning("No hero pairs meet the specified criteria.")
+
+    elif mode == "counter":
+        focus_side = None
+        if team_filter != 'all':
+            focus_side = st.selectbox("Focus Perspective:", 
+                options=[(f"When {team_norm2disp[team_filter]} uses hero", "when_uses"), 
+                         (f"When playing against {team_norm2disp[team_filter]}", "when_against")],
+                format_func=lambda x: x[0])[1]
+
+        df = analyze_counter(tuple(pooled_matches), min_games, team_filter=team_filter, focus_side=focus_side)
+        if not df.empty:
+            df_display = df.head(top_n)
+            render_strictly_sticky_table(df_display)
+            offer_csv_download_button(df_display, "counter_data.csv")
+        else:
+            st.warning("No counter matchups meet the specified criteria.")
+
+@st.cache_data(show_spinner="Analyzing synergy data...")
+def analyze_synergy(_pooled_matches_tuple, team_filter, min_games, anti=False, focus_hero=None):
+    # This function's logic is identical to the notebook's analyze_synergy
+    # It is wrapped in st.cache_data for performance
+    pooled_matches = list(_pooled_matches_tuple)
+    duo_counter = {}
+    for match in pooled_matches:
+        teams_names = [opp.get("name", "").strip().lower() for opp in match.get("match2opponents", [])]
+        for game in match.get("match2games", []):
+            winner = str(game.get("winner", ""))
+            for idx, opp in enumerate(game.get("opponents", [])):
+                if team_filter != "all" and (len(teams_names) <= idx or teams_names[idx] != team_filter):
+                    continue
+                players = [p["champion"] for p in opp.get("players", []) if isinstance(p, dict) and "champion" in p]
+                for a, b in itertools.combinations(sorted(players), 2):
+                    key = (a, b)
+                    if key not in duo_counter:
+                        duo_counter[key] = {"games": 0, "wins": 0}
+                    duo_counter[key]["games"] += 1
+                    if str(idx + 1) == winner:
+                        duo_counter[key]["wins"] += 1
+    rows = []
+    for (h1, h2), stats in duo_counter.items():
+        if stats["games"] >= min_games:
+            if focus_hero and focus_hero != "(Show All)":
+                if h1 != focus_hero and h2 != focus_hero:
+                    continue
+            rows.append({
+                "Hero 1": h1, "Hero 2": h2,
+                "Games Together": stats["games"], "Wins": stats["wins"],
+                "Win Rate (%)": round(stats["wins"] / stats["games"] * 100, 2)
+            })
+    df = pd.DataFrame(rows)
+    if df.empty: return df
+    df = df.sort_values("Win Rate (%)", ascending=anti)
+    return df
+
+@st.cache_data(show_spinner="Analyzing counter data...")
+def analyze_counter(_pooled_matches_tuple, min_games, ally_hero=None, enemy_hero=None, team_filter=None, focus_side=None):
+    # This function's logic is identical to the notebook's analyze_counter
+    # It is wrapped in st.cache_data for performance
+    pooled_matches = list(_pooled_matches_tuple)
+    counter_stats = {}
+    for match in pooled_matches:
+        opp_names = [opp.get("name", "").strip().lower() for opp in match.get("match2opponents", [])]
+        for game in match.get("match2games", []):
+            opponents = game.get("opponents", [])
+            winner = str(game.get("winner", ""))
+            if len(opponents) != 2: continue
+
+            team_indices_to_process = []
+            if team_filter and team_filter != "all" and team_filter in opp_names:
+                team_idx = opp_names.index(team_filter)
+                opp_idx = 1 - team_idx
+                if focus_side == "when_uses":
+                    team_indices_to_process.append({'ally': team_idx, 'enemy': opp_idx})
+                elif focus_side == "when_against":
+                    team_indices_to_process.append({'ally': opp_idx, 'enemy': team_idx})
+            else: # Global analysis
+                team_indices_to_process.append({'ally': 0, 'enemy': 1})
+                team_indices_to_process.append({'ally': 1, 'enemy': 0})
+
+            for perspective in team_indices_to_process:
+                ally_idx, enemy_idx = perspective['ally'], perspective['enemy']
+                ally_heroes = [p["champion"] for p in opponents[ally_idx].get("players", []) if isinstance(p, dict) and "champion" in p]
+                enemy_heroes = [p["champion"] for p in opponents[enemy_idx].get("players", []) if isinstance(p, dict) and "champion" in p]
+                is_win = (str(ally_idx + 1) == winner)
+
+                for a in ally_heroes:
+                    if ally_hero and a != ally_hero: continue
+                    for b in enemy_heroes:
+                        if enemy_hero and b != enemy_hero: continue
+                        k = (a, b)
+                        if k not in counter_stats:
+                            counter_stats[k] = {"games": 0, "wins": 0}
+                        counter_stats[k]["games"] += 1
+                        if is_win: counter_stats[k]["wins"] += 1
+    rows = []
+    for (a, b), stats in counter_stats.items():
+        if stats["games"] >= min_games:
+            rows.append({
+                "Ally Hero": a, "Enemy Hero": b,
+                "Games Against": stats["games"], "Wins": stats["wins"],
+                "Win Rate (%)": round(stats["wins"] / stats["games"] * 100, 2)
+            })
+    df = pd.DataFrame(rows)
+    return df if df.empty else df.sort_values("Win Rate (%)", ascending=False)
+
+def plot_synergy_bar(df, title, focus_hero=None):
+    if df.empty: return
+    fig, ax = plt.subplots(figsize=(8, 0.32 * len(df) + 1.1))
+    
+    if focus_hero and focus_hero != "(Show All)":
+        desc = [h2 if h1 == focus_hero else h1 for h1, h2 in zip(df["Hero 1"], df["Hero 2"])]
+    else:
+        desc = [f"{h1} + {h2}" for h1, h2 in zip(df["Hero 1"], df["Hero 2"])]
+        
+    colors = ['#43a047' if x >= 55 else '#e53935' if x <= 45 else '#ffb300' for x in df["Win Rate (%)"]]
+    ax.barh(desc, df["Win Rate (%)"], color=colors)
+    
+    for i, value in enumerate(df["Win Rate (%)"]):
+        ax.text(value + 0.5, i, f'{value:.1f}%', va='center', fontsize=10, fontweight='bold')
+        
+    ax.set_xlabel("Win Rate (%)", fontsize=11, fontweight='bold')
+    ax.set_title(title, fontsize=15, fontweight='bold', pad=11)
+    ax.xaxis.grid(True, linestyle=':', alpha=0.45)
+    ax.set_axisbelow(True)
+    sns.despine(left=True, bottom=True)
+    plt.tight_layout()
+    st.pyplot(fig) # <<< Renders the plot in Streamlit
+
+def plot_counter_heatmap(df, title):
+    if df.empty: return
+    # This function's logic is identical to the notebook's plot_counter_heatmap
+    # It just uses st.pyplot(fig) at the end.
+    mat = df.pivot(index="Ally Hero", columns="Enemy Hero", values="Win Rate (%)")
+    fig, ax = plt.subplots(figsize=(12, 10))
+    sns.heatmap(mat, annot=True, fmt=".1f", cmap="coolwarm", linewidths=.5, ax=ax)
+    ax.set_title(title, fontsize=16, fontweight='bold', pad=15)
+    plt.tight_layout()
+    st.pyplot(fig) # <<< Renders the plot in Streamlit
 
 def build_playoff_qualification_ui(*args, **kwargs):
     st.header("Playoff Qualification Odds (What-If Scenario)")
@@ -745,4 +911,5 @@ if __name__ == "__main__":
             st.session_state[key] = default_value
     
     main()
+
 
