@@ -845,6 +845,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
             unplayed.append((m['teamA'], m['teamB'], m['date'], m['bestof']))
 
     st.subheader("🔮 What-If Scenarios for Upcoming Matches")
+    # ... (What-If Scenarios logic remains the same)
     forced_outcomes = {}
     if unplayed:
         for week_idx, week_dates in enumerate(week_blocks):
@@ -857,12 +858,9 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
                         forced_outcomes[match_key] = st.radio(f"**{teamA} vs {teamB}** ({date})", options=outcomes.keys(), format_func=lambda x: outcomes[x], horizontal=True, key=match_key)
     else:
         st.info("All regular season matches up to the selected cutoff have been played.")
-
     st.markdown("---")
     
-    # <<< FIX: This entire final block is updated to match the notebook's sorting and ranking logic >>>
-    
-    # 1. Generate the two tables
+    # --- Data Generation and Sorting Logic ---
     standings_df = build_standings_table(teams, played)
     df_probs = run_monte_carlo_sim(
         _teams=tuple(teams), 
@@ -874,17 +872,33 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         n_sim=n_sims
     )
     
-    # 2. Add Rank to standings table
+    # Create a copy for debugging before attempting to sort
+    df_probs_before_sort = df_probs.copy()
+    team_order = [] # Initialize team_order
+
     if not standings_df.empty:
         standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
+        team_order = standings_df['Team'].tolist()
     
-    # 3. Sort the probabilities table using the standings order and add Rank
-    if not df_probs.empty and not standings_df.empty:
-        # Use .loc for robust re-ordering based on the 'Team' column from standings_df
-        df_probs = df_probs.set_index("Team").loc[standings_df["Team"]].reset_index()
-        df_probs.insert(0, "Rank", range(1, len(df_probs) + 1))
+    if not df_probs.empty and team_order:
+        try:
+            df_probs = df_probs.set_index("Team").reindex(team_order).reset_index()
+            df_probs.insert(0, "Rank", range(1, len(df_probs) + 1))
+        except Exception as e:
+            st.error(f"An error occurred during sorting: {e}")
 
-    # 4. Display the final, sorted tables
+    # <<< FIX: Add a debug view to inspect the data and sorting order
+    with st.expander("🕵️ Sort Debug View"):
+        st.write("**This is the team order the app is trying to use for sorting:**")
+        st.json(team_order)
+        
+        st.write("**This is the Probabilities table BEFORE sorting:**")
+        st.dataframe(df_probs_before_sort, use_container_width=True)
+        
+        st.write("**This is the Probabilities table AFTER attempting to sort:**")
+        st.dataframe(df_probs, use_container_width=True)
+
+    # --- Display Logic ---
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Qualification Probabilities")
@@ -893,6 +907,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
     with col2:
         st.subheader("Current Standings (Up to Cutoff)")
         st.dataframe(standings_df, use_container_width=True, hide_index=True)
+
             
 def build_enhanced_draft_assistant_ui(*args, **kwargs):
     st.header("Drafting Assistant")
@@ -1221,6 +1236,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
