@@ -1037,6 +1037,10 @@ def main():
 
     all_tournaments = {**archived_tournaments, **live_tournaments}
 
+    # <<< FIX: Define a callback function to synchronize checkbox states from different keys
+    def sync_checkboxes(name, key):
+        st.session_state.tournament_selections[name] = st.session_state[key]
+
     mode = st.sidebar.radio(
         "Select Analysis Mode:",
         ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head',
@@ -1047,8 +1051,6 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Select Tournaments")
     
-    # <<< FIX: Use a unified key for each tournament checkbox
-    # This ensures that checking a tournament in one tab checks it in the other.
     tab1, tab2 = st.sidebar.tabs(["By Region", "By Year"])
 
     with tab1:
@@ -1057,7 +1059,15 @@ def main():
         for region in sorted(regions.keys()):
             with st.expander(f"{region} ({len(regions[region])})"):
                 for name in regions[region]:
-                    st.checkbox(name, key=f"sel_{name}") # Unified key e.g., "sel_MPL ID Season 16"
+                    # <<< FIX: Use a UNIQUE key and sync with session state via callback
+                    region_key = f"region_{name}"
+                    st.checkbox(
+                        name, 
+                        key=region_key,
+                        value=st.session_state.tournament_selections[name],
+                        on_change=sync_checkboxes,
+                        args=(name, region_key)
+                    )
 
     with tab2:
         years = defaultdict(list)
@@ -1065,42 +1075,41 @@ def main():
         for year in sorted(years.keys(), reverse=True):
             with st.expander(f"Year {year} ({len(years[year])})"):
                 for name in years[year]:
-                    st.checkbox(name, key=f"sel_{name}") # Using the EXACT SAME key as the other tab
+                    # <<< FIX: Use another UNIQUE key and sync with the same session state
+                    year_key = f"year_{name}"
+                    st.checkbox(
+                        name, 
+                        key=year_key,
+                        value=st.session_state.tournament_selections[name],
+                        on_change=sync_checkboxes,
+                        args=(name, year_key)
+                    )
 
     st.sidebar.markdown("---")
     
-    # <<< FIX: Gather selections based on the unified keys from session_state
-    selected_tournaments = [
-        name for name, data in all_tournaments.items()
-        if st.session_state.get(f"sel_{name}")
-    ]
+    # <<< FIX: Gather selections from the central session state dictionary
+    selected_tournaments = [name for name, is_selected in st.session_state.tournament_selections.items() if is_selected]
 
     if st.sidebar.button("Analyze Selected Tournaments", use_container_width=True, type="primary"):
         if not selected_tournaments:
             st.sidebar.error("Please select at least one tournament.")
         else:
+            # When the button is clicked, we set the state for the main app to read
             st.session_state.selected_tournaments = selected_tournaments
-            st.session_state.mode = mode
             st.session_state.analysis_ready = True
             st.session_state.run_training = False
             st.session_state.toasts_shown = set()
-            st.session_state.success_message_shown = False # Reset success message
+            st.session_state.success_message_shown = False
+            st.session_state.tournaments_shown = [] # Force a data reload
 
-    if st.sidebar.button("Train AI Draft Model", use_container_width=True):
-         st.session_state.run_training = True
-         st.session_state.analysis_ready = False
-         st.session_state.selected_tournaments_for_training = selected_tournaments
-    
-    # This logic block now runs if analysis is ready, and uses the live radio button value.
+    # ... (The rest of the main function remains the same) ...
     if st.session_state.get('analysis_ready', False):
         pooled_matches = st.session_state.get('pooled_matches', [])
         tournaments_shown = st.session_state.get('tournaments_shown', [])
 
-        # Load data only if it hasn't been loaded for this selection yet
         if tournaments_shown != st.session_state.get('selected_tournaments'):
             with st.spinner(f"Loading data for {len(st.session_state.selected_tournaments)} tournament(s)..."):
                 pooled_matches = []
-                has_errors = False
                 for name in st.session_state.selected_tournaments:
                     path = all_tournaments[name]['path']
                     data, error = load_tournament_matches(path)
@@ -1116,7 +1125,6 @@ def main():
                 st.session_state.tournaments_shown = st.session_state.selected_tournaments
                 if not pooled_matches:
                     st.session_state.analysis_ready = False
-
 
         if not st.session_state.pooled_matches:
             st.error("Could not load any match data for the selected tournaments.")
@@ -1142,7 +1150,8 @@ def main():
                 build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
 
     elif st.session_state.get('run_training', False):
-        # ... (training logic remains the same)
+        # Placeholder for training logic
+        st.info("Training mode activated.")
         pass
     else:
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
