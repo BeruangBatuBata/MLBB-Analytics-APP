@@ -811,7 +811,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     with st.expander("⚙️ Configure Brackets & Settings"):
         create_bracket_config_ui(tournament_name)
-        st.session_state.n_sims = st.slider("Number of Simulations", 1000, 50000, 50000, step=1000)
+        n_sims = st.slider("Number of Simulations", 1000, 50000, 10000, step=1000)
 
     brackets = st.session_state.bracket_config
     
@@ -820,16 +820,8 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
     
     if not week_options: st.warning("No match dates found."); return
 
-    # <<< FIX: Logic to find the last completed week and set it as the default
-    last_played_date = max(
-        (m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), 
-        default=datetime.date(1970, 1, 1)
-    )
-    
-    default_week_idx = next(
-        (i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), 
-        -1 # Default to pre-season if no matches have been played
-    )
+    last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
+    default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
     
     cutoff_week_idx = st.select_slider(
         "Select Cutoff Week (Simulate from this point forward)", 
@@ -838,7 +830,6 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         value=default_week_idx
     )
 
-    # --- The rest of the function remains the same ---
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
     cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
 
@@ -859,27 +850,40 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
                 if not week_matches: continue
                 with st.expander(f"Week {week_idx + 1} Matches ({week_dates[0]} to {week_dates[-1]})"):
                     for teamA, teamB, date, bestof in week_matches:
-                        match_key = f"{teamA}|{teamB}|{date}"; outcomes = {"random": "Random", f"A_2-0": f"{teamA} 2-0", f"A_2-1": f"{teamA} 2-1", f"B_2-1": f"{teamB} 2-1", f"B_2-0": f"{teamB} 2-0"}
+                        match_key = f"{teamA}|{teamB}|{date}"
+                        outcomes = {"random": "Random", "A_2-0": f"{teamA} 2-0", "A_2-1": f"{teamA} 2-1", "B_2-1": f"{teamB} 2-1", "B_2-0": f"{teamB} 2-0"}
                         forced_outcomes[match_key] = st.radio(f"**{teamA} vs {teamB}** ({date})", options=outcomes.keys(), format_func=lambda x: outcomes[x], horizontal=True, key=match_key)
     else:
         st.info("All regular season matches up to the selected cutoff have been played.")
 
     st.markdown("---")
-    if st.button("Run Monte Carlo Simulation", use_container_width=True, type="primary"):
-        st.session_state.run_sim = True
-        st.session_state.forced_outcomes_for_run = forced_outcomes.copy()
-
-    if st.session_state.get('run_sim', False):
-        hashable_brackets = tuple(tuple(b.items()) for b in brackets)
-        df_probs = run_monte_carlo_sim(tuple(teams), current_wins, current_diff, tuple(unplayed), st.session_state.forced_outcomes_for_run, hashable_brackets, n_sim=st.session_state.get('n_sims', 10000))
-        standings_df = build_standings_table(teams, played)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.subheader("Qualification Probabilities")
-            st.dataframe(df_probs, use_container_width=True); offer_csv_download_button(df_probs, "playoff_probabilities.csv")
-        with col2:
-            st.subheader("Current Standings (Up to Cutoff)")
-            st.dataframe(standings_df, use_container_width=True)
+    
+    # <<< FIX: Removed the button and the conditional check (if st.session_state.get('run_sim', False):).
+    # This block now runs on every interaction, and the cached simulation function will
+    # only re-compute if an input (like the slider or radio buttons) has changed.
+    
+    hashable_brackets = tuple(tuple(b.items()) for b in brackets)
+    
+    df_probs = run_monte_carlo_sim(
+        _teams=tuple(teams), 
+        _current_wins=current_wins, 
+        _current_diff=current_diff, 
+        _unplayed_matches=tuple(unplayed), 
+        _forced_outcomes=forced_outcomes, 
+        _hashable_brackets=hashable_brackets, 
+        n_sim=n_sims
+    )
+    
+    standings_df = build_standings_table(teams, played)
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("Qualification Probabilities")
+        st.dataframe(df_probs, use_container_width=True)
+        offer_csv_download_button(df_probs, "playoff_probabilities.csv")
+    with col2:
+        st.subheader("Current Standings (Up to Cutoff)")
+        st.dataframe(standings_df, use_container_width=True)
             
 def build_enhanced_draft_assistant_ui(*args, **kwargs):
     st.header("Drafting Assistant")
@@ -1149,6 +1153,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
