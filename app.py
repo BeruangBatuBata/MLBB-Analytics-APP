@@ -799,7 +799,6 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
 
 
 def playoff_dashboard_single(matches_for_tournament, tournament_name):
-    """The main UI for the single-table simulation."""
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
     
@@ -821,11 +820,25 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
     
     if not week_options: st.warning("No match dates found."); return
 
-    last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
-    default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
+    # <<< FIX: Logic to find the last completed week and set it as the default
+    last_played_date = max(
+        (m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), 
+        default=datetime.date(1970, 1, 1)
+    )
     
-    cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=default_week_idx)
+    default_week_idx = next(
+        (i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), 
+        -1 # Default to pre-season if no matches have been played
+    )
+    
+    cutoff_week_idx = st.select_slider(
+        "Select Cutoff Week (Simulate from this point forward)", 
+        options=sorted(week_options.keys()), 
+        format_func=lambda x: week_options[x], 
+        value=default_week_idx
+    )
 
+    # --- The rest of the function remains the same ---
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
     cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
 
@@ -867,7 +880,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
         with col2:
             st.subheader("Current Standings (Up to Cutoff)")
             st.dataframe(standings_df, use_container_width=True)
-
+            
 def build_enhanced_draft_assistant_ui(*args, **kwargs):
     st.header("Drafting Assistant")
     st.warning("This feature's UI is highly complex and not fully converted in this example.")
@@ -964,10 +977,16 @@ def build_standings_table(teams, played_matches):
 
 def create_bracket_config_ui(tournament_name):
     st.subheader("⚙️ Configure Playoff Brackets")
-    default_brackets = [{"start": 1, "end": 2, "name": "Upper Bracket"}, {"start": 3, "end": 6, "name": "Lower Bracket"}, {"start": 7, "end": None, "name": "Eliminated"}]
+    # <<< FIX: Updated the default bracket configuration to be more descriptive
+    default_brackets = [
+        {"start": 1, "end": 2, "name": "Upper Bracket"},
+        {"start": 3, "end": 6, "name": "Lower Bracket"},
+        {"start": 7, "end": None, "name": "Eliminated"}
+    ]
     if 'bracket_config' not in st.session_state:
         st.session_state.bracket_config = load_config(tournament_name, 'bracket', default=default_brackets)
     
+    # The rest of the function remains the same...
     for i, bracket in enumerate(st.session_state.bracket_config):
         c1, c2, c3, c4 = st.columns([2,1,1,1])
         bracket['name'] = c1.text_input("Bracket Name", value=bracket['name'], key=f"br_name_{i}")
@@ -1116,6 +1135,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
