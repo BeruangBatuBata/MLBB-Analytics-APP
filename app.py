@@ -765,6 +765,7 @@ def plot_counter_heatmap(df, title):
     st.pyplot(fig) # <<< Renders the plot in Streamlit
 
 def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
+    """This function now acts as a router to guide the user through setup."""
     st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
     
     # --- Step 1: Determine Tournament Format (Single Table vs Groups) ---
@@ -781,20 +782,24 @@ def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
             st.session_state[format_key] = 'single'
             st.rerun()
         if c2.button("Group Stage", use_container_width=True):
-            st.warning("Group Stage mode is not fully implemented in this version.")
-            # save_config(tournament_name, 'format', {'type': 'groups'})
-            # st.session_state[format_key] = 'groups'
-            # st.rerun()
+            st.warning("Group Stage mode is a work in progress and may not be fully functional.")
+            save_config(tournament_name, 'format', {'type': 'groups'})
+            st.session_state[format_key] = 'groups'
+            st.rerun()
         return
 
     # --- Step 2: Route to the correct dashboard ---
     if st.session_state[format_key] == 'single':
         playoff_dashboard_single(matches_for_tournament, tournament_name)
     elif st.session_state[format_key] == 'groups':
-        st.info("Group stage dashboard is under construction.")
+        st.error("Group Stage UI is not yet implemented in this version.")
+        if st.button("Reset Format Choice"):
+            st.session_state[format_key] = 'unknown'
+            st.rerun()
+
 
 def playoff_dashboard_single(matches_for_tournament, tournament_name):
-    # This function contains the main UI for the single-table simulation
+    """The main UI for the single-table simulation."""
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
     
@@ -816,7 +821,10 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
     
     if not week_options: st.warning("No match dates found."); return
 
-    cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=max(week_options.keys()))
+    last_played_date = max((m['date'] for m in regular_season_matches if m['winner'] in ('1', '2')), default=datetime.date(1970, 1, 1))
+    default_week_idx = next((i for i, week in enumerate(week_blocks) if last_played_date >= week[0] and last_played_date <= week[-1]), -1)
+    
+    cutoff_week_idx = st.select_slider("Select Cutoff Week (Simulate from this point forward)", options=sorted(week_options.keys()), format_func=lambda x: week_options[x], value=default_week_idx)
 
     played, unplayed, current_wins, current_diff = [], [], {t: 0 for t in teams}, {t: 0 for t in teams}
     cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
@@ -850,7 +858,7 @@ def playoff_dashboard_single(matches_for_tournament, tournament_name):
 
     if st.session_state.get('run_sim', False):
         hashable_brackets = tuple(tuple(b.items()) for b in brackets)
-        df_probs = run_monte_carlo_sim(tuple(teams), current_wins, current_diff, tuple(unplayed), st.session_state.forced_outcomes_for_run, hashable_brackets, n_sim=st.session_state.n_sims)
+        df_probs = run_monte_carlo_sim(tuple(teams), current_wins, current_diff, tuple(unplayed), st.session_state.forced_outcomes_for_run, hashable_brackets, n_sim=st.session_state.get('n_sims', 10000))
         standings_df = build_standings_table(teams, played)
         col1, col2 = st.columns(2)
         with col1:
@@ -870,7 +878,6 @@ def build_enhanced_draft_assistant_ui(*args, **kwargs):
 # =================================================
 
 def parse_matches(matches_raw):
-    # This function is the robust version from our debugging
     if not matches_raw: return []
     first_parent = matches_raw[0].get("parent")
     if first_parent and any(m.get("parent") != first_parent for m in matches_raw):
@@ -898,10 +905,8 @@ def build_week_blocks(dates):
     if not dates: return []
     blocks = [[dates[0]]]
     for prev, curr in zip(dates, dates[1:]):
-        if (curr - prev).days <= 2:
-            blocks[-1].append(curr)
-        else:
-            blocks.append([curr])
+        if (curr - prev).days <= 2: blocks[-1].append(curr)
+        else: blocks.append([curr])
     return blocks
 
 def get_config_cache_key(tournament_name, config_type):
@@ -959,7 +964,7 @@ def build_standings_table(teams, played_matches):
 
 def create_bracket_config_ui(tournament_name):
     st.subheader("⚙️ Configure Playoff Brackets")
-    default_brackets = [{"start": 1, "end": 6, "name": "Playoffs"}, {"start": 7, "end": None, "name": "Eliminated"}]
+    default_brackets = [{"start": 1, "end": 2, "name": "Upper Bracket"}, {"start": 3, "end": 6, "name": "Lower Bracket"}, {"start": 7, "end": None, "name": "Eliminated"}]
     if 'bracket_config' not in st.session_state:
         st.session_state.bracket_config = load_config(tournament_name, 'bracket', default=default_brackets)
     
@@ -1111,6 +1116,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
