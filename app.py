@@ -765,14 +765,22 @@ def plot_counter_heatmap(df, title):
     st.pyplot(fig) # <<< Renders the plot in Streamlit
 
 def build_playoff_qualification_ui(pooled_matches, tournament_name):
-    # This is a simplified single-table version for clarity.
-    # A full group stage version would be significantly more complex.
-    
     st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
 
+    # <<< FIX: Filter the pooled_matches to ONLY include matches from the selected tournament.
+    # This is the key fix to prevent data contamination from other selections.
+    relevant_matches_raw = [
+        m for m in pooled_matches 
+        if m.get('tournament', '').strip() == tournament_name.strip()
+    ]
+    if not relevant_matches_raw:
+        # Fallback for older data that may not have the 'tournament' field
+        relevant_matches_raw = pooled_matches
+
     # --- Data Preparation ---
-    all_matches = parse_matches(pooled_matches)
+    all_matches = parse_matches(relevant_matches_raw)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
+    
     if not regular_season_matches:
         st.warning("No regular season matches could be identified for this tournament.")
         return
@@ -782,7 +790,6 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
     week_blocks = build_week_blocks(all_dates)
 
     # --- Bracket Configuration ---
-    # Simplified: Using a default. A full conversion would use create_bracket_config_ui.
     brackets = [
         {"start": 1, "end": 2, "name": "Upper Bracket", "color": "#4CAF50"},
         {"start": 3, "end": 6, "name": "Lower Bracket", "color": "#2196F3"},
@@ -793,6 +800,10 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
     week_options = {i: f"Week {i+1}: {wk[0]} to {wk[-1]}" for i, wk in enumerate(week_blocks)}
     week_options[-1] = "Pre-Season (0 matches played)"
     
+    if not week_options:
+        st.warning("No match dates found to create week blocks.")
+        return
+
     cutoff_week_idx = st.select_slider(
         "Select Cutoff Week (Simulate from this point forward)",
         options=sorted(week_options.keys()),
@@ -805,7 +816,7 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
     current_wins = {t: 0 for t in teams}
     current_diff = {t: 0 for t in teams}
     
-    cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 else datetime.date(1970, 1, 1)
+    cutoff_date = week_blocks[cutoff_week_idx][-1] if cutoff_week_idx != -1 and week_blocks else datetime.date(1970, 1, 1)
 
     for m in regular_season_matches:
         if m['date'] <= cutoff_date:
@@ -835,7 +846,6 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
                 for teamA, teamB, date, bestof in week_matches:
                     match_key = f"{teamA}|{teamB}|{date}"
                     
-                    # Simplified outcomes for the radio button
                     outcomes = {
                         "random": "Random",
                         f"A_{'2-0' if bestof==3 else '1-0'}": f"{teamA} Wins",
@@ -848,26 +858,21 @@ def build_playoff_qualification_ui(pooled_matches, tournament_name):
                         format_func=lambda x: outcomes[x],
                         horizontal=True,
                         key=match_key,
-                        index=0 # Default to Random
+                        index=0
                     )
                     forced_outcomes[match_key] = selected_outcome
 
-    # --- Simulation and Display ---
     st.markdown("---")
     if st.button("Run Monte Carlo Simulation", use_container_width=True, type="primary"):
         st.session_state.run_sim = True
         st.session_state.forced_outcomes_for_run = forced_outcomes.copy()
 
-    # Location: Inside the `build_playoff_qualification_ui` function
-
     if st.session_state.get('run_sim', False):
-        # <<< FIX: Convert the list of dictionaries into a hashable format (tuple of tuples)
         hashable_brackets = tuple(tuple(b.items()) for b in brackets)
-
         df_probs = run_monte_carlo_sim(
             tuple(teams), current_wins, current_diff, 
             tuple(unplayed), st.session_state.forced_outcomes_for_run, 
-            hashable_brackets # <<< FIX: Pass the new hashable variable
+            hashable_brackets
         )
         
         standings_df = build_standings_table(teams, played)
@@ -1188,4 +1193,5 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
 
     main()
+
 
