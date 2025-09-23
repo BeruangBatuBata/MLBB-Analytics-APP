@@ -948,10 +948,9 @@ def get_series_outcome_options(teamA, teamB, bo:int):
         opts+=[(f"{teamA} Win","A_1-0"), (f"{teamB} Win","B_1-0")]
     return opts
 
-@st.cache_data(show_spinner="Running Monte Carlo simulation...")
 def run_monte_carlo_sim(_teams, _wins_tuple, _diff_tuple, _unplayed_matches, _forced_outcomes_tuple, _hashable_brackets, n_sim=10000):
-    # <<< TEST: This message will only appear if the function is re-running (a cache miss)
-    st.warning("DEBUG: SIMULATION IS RE-RUNNING!")
+    # This message will now appear on every single interaction.
+    st.info("Calculating probabilities...")
     
     _current_wins = dict(_wins_tuple)
     _current_diff = dict(_diff_tuple)
@@ -1210,6 +1209,7 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     
     main()
+
 
 
 
