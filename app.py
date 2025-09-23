@@ -1104,10 +1104,8 @@ def main():
 
     # ... (The rest of the main function remains the same) ...
     if st.session_state.get('analysis_ready', False):
-        pooled_matches = st.session_state.get('pooled_matches', [])
-        tournaments_shown = st.session_state.get('tournaments_shown', [])
-
-        if tournaments_shown != st.session_state.get('selected_tournaments'):
+        # When a new analysis starts, this block reloads the data
+        if st.session_state.get('tournaments_shown', []) != st.session_state.get('selected_tournaments'):
             with st.spinner(f"Loading data for {len(st.session_state.selected_tournaments)} tournament(s)..."):
                 pooled_matches = []
                 for name in st.session_state.selected_tournaments:
@@ -1121,18 +1119,24 @@ def main():
                             st.toast(f"Loaded {len(data)} matches for {name}")
                             st.session_state.toasts_shown.add(name)
                 
+                # Update the session state with the newly loaded data
                 st.session_state.pooled_matches = pooled_matches
                 st.session_state.tournaments_shown = st.session_state.selected_tournaments
                 if not pooled_matches:
                     st.session_state.analysis_ready = False
 
-        if not st.session_state.pooled_matches:
+        # <<< FIX: Retrieve the most up-to-date variables from session state for this run
+        pooled_matches = st.session_state.get('pooled_matches', [])
+        tournaments_shown = st.session_state.get('tournaments_shown', [])
+
+        if not pooled_matches:
             st.error("Could not load any match data for the selected tournaments.")
         else:
             if not st.session_state.get('success_message_shown', False):
                  st.success(f"Successfully loaded data for {len(tournaments_shown)} tournament(s). Total matches found: {len(pooled_matches)}")
                  st.session_state.success_message_shown = True
 
+            # This is the main router for displaying the correct page
             if mode == 'Statistics breakdown':
                 build_statistics_breakdown(pooled_matches, tournaments_shown)
             elif mode == 'Hero detail drilldown':
@@ -1142,10 +1146,14 @@ def main():
             elif mode == 'Synergy & Counter Analysis':
                 build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
             elif mode == 'Playoff Qualification Odds (What-If Scenario)':
+                # <<< FIX: Added a more robust check for list length
                 if len(tournaments_shown) > 1:
                     st.warning("⚠️ Please select only ONE tournament for Playoff Odds analysis.")
-                else:
+                elif len(tournaments_shown) == 1:
                     build_playoff_qualification_ui(pooled_matches, tournaments_shown[0])
+                # This handles the case where the list might be empty, preventing the error
+                else:
+                    st.error("An error occurred. Please re-select a tournament and try again.")
             elif mode == 'Drafting Assistant':
                 build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
 
@@ -1180,3 +1188,4 @@ if __name__ == "__main__":
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
 
     main()
+
