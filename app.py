@@ -1161,7 +1161,15 @@ def main():
         if not selected_tournaments:
             st.sidebar.error("Please select at least one tournament.")
         else:
-            keys_to_reset = ['matches_dict', 'tournaments_shown', 'current_mode', 'data_ready', 'bracket_config', 'run_sim']
+            # <<< FIX: This is the hard reset logic. It clears all old data.
+            keys_to_reset = [
+                'matches_dict', 
+                'tournaments_shown', 
+                'current_mode', 
+                'data_ready', 
+                'bracket_config',
+                'run_sim'
+            ]
             for key in keys_to_reset:
                 if key in st.session_state:
                     del st.session_state[key]
@@ -1170,7 +1178,7 @@ def main():
                 matches_dict = {}
                 for name in selected_tournaments:
                     path = all_tournaments[name]['path']
-                    # <<< FIX: Restored the 'name' argument to the function call
+                    # Pass the tournament name to the loading function to tag the data
                     data, error = load_tournament_matches(path, name)
                     if error:
                         st.warning(error)
@@ -1215,10 +1223,10 @@ def main():
                 build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
     else:
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
-
 if __name__ == "__main__":
     if 'tournament_selections' not in st.session_state:
         all_tournaments = {**archived_tournaments, **live_tournaments}
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     main()
+
 
