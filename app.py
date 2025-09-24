@@ -146,8 +146,8 @@ def local_cache_path(key):
     return os.path.join(cache_dir, safe_cache_key(key) + ".json")
 
 @st.cache_data(ttl=300)
-def load_tournament_matches(_tournament_path):
-    """Load match data from Liquipedia API and return (data, error_message)."""
+def load_tournament_matches(_tournament_path, tournament_name):
+    """Load match data and tag each match with the tournament name."""
     try:
         params = BASE_PARAMS.copy()
         params['conditions'] = f"[[parent::{_tournament_path}]]"
@@ -158,6 +158,10 @@ def load_tournament_matches(_tournament_path):
             return None, f"API Error for {_tournament_path}: {resp.status_code} - {resp.text}"
         
         matches = resp.json().get("result", [])
+        
+        # <<< FIX: Add a unique identifier to every match record
+        for match in matches:
+            match['tournament_name'] = tournament_name
         
         path = local_cache_path(f"matches_{_tournament_path}")
         with open(path, 'w') as f:
@@ -170,10 +174,10 @@ def load_tournament_matches(_tournament_path):
         if os.path.exists(path):
             try:
                 with open(path) as f:
-                    return json.load(f), f"API failed for {_tournament_path}, loaded from stale cache."
-            except Exception as file_e:
-                 return None, f"API and file cache failed for {_tournament_path}: {file_e}"
-        return None, f"Error loading matches for {_tournament_path}: {e}"
+                    return json.load(f), f"API failed, loaded from stale cache."
+            except:
+                 return None, f"API and file cache failed."
+        return None, f"Error loading matches: {e}"
 
 
 # -----------------------
@@ -781,6 +785,10 @@ def plot_counter_heatmap(df, title):
 def build_playoff_qualification_ui(matches_for_tournament, tournament_name):
     st.header(f"🏆 Playoff Qualification Odds for {tournament_name}")
 
+    # <<< FIX: Aggressively filter matches to ensure only the correct tournament is processed
+    matches_for_tournament = [m for m in matches_for_tournament if m.get('tournament_name') == tournament_name]
+
+    # --- Data Preparation ---
     all_matches = parse_matches(matches_for_tournament)
     regular_season_matches = [m for m in all_matches if not m['is_playoff']]
     
@@ -1217,5 +1225,6 @@ def main():
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
     
     main()
+
 
 
