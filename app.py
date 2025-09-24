@@ -1097,71 +1097,91 @@ def main():
     st.sidebar.title(" MLBB Analytics Dashboard")
     
     if 'hero_data_status' not in st.session_state:
-        if not HERO_PROFILES or not HERO_DAMAGE_TYPE: st.session_state.hero_data_status = "Error"
-        else: st.session_state.hero_data_status = "Loaded"
+        if not HERO_PROFILES or not HERO_DAMAGE_TYPE:
+            st.session_state.hero_data_status = "Error"
+        else:
+            st.session_state.hero_data_status = "Loaded"
 
-    if st.session_state.hero_data_status == "Error": st.sidebar.error("Hero data files not found.")
-    else: st.sidebar.success("Hero data files loaded.")
+    if st.session_state.hero_data_status == "Error":
+        st.sidebar.error("Hero data files not found.")
+    else:
+        st.sidebar.success("Hero data files loaded.")
 
     all_tournaments = {**archived_tournaments, **live_tournaments}
 
     def sync_checkboxes(name, key):
         st.session_state.tournament_selections[name] = st.session_state[key]
 
-    mode = st.sidebar.radio("Select Analysis Mode:", ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head', 'Synergy & Counter Analysis', 'Playoff Qualification Odds (What-If Scenario)', 'Drafting Assistant'])
+    mode = st.sidebar.radio(
+        "Select Analysis Mode:",
+        ['Statistics breakdown', 'Hero detail drilldown', 'Head-to-head',
+         'Synergy & Counter Analysis', 'Playoff Qualification Odds (What-If Scenario)', 
+         'Drafting Assistant']
+    )
 
-    st.sidebar.markdown("---"); st.sidebar.subheader("Select Tournaments")
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Select Tournaments")
     
     tab1, tab2 = st.sidebar.tabs(["By Region", "By Year"])
     with tab1:
-        regions = defaultdict(list); [regions[data['region']].append(name) for name, data in all_tournaments.items()]
+        regions = defaultdict(list)
+        for name, data in all_tournaments.items():
+            regions[data['region']].append(name)
+        
         for region in sorted(regions.keys()):
             with st.expander(f"{region} ({len(regions[region])})"):
                 for name in regions[region]:
-                    region_key = f"region_{name}"; st.checkbox(name, key=region_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, region_key))
+                    region_key = f"region_{name}"
+                    st.checkbox(name, key=region_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, region_key))
+
     with tab2:
-        years = defaultdict(list); [years[data['year']].append(name) for name, data in all_tournaments.items()]
+        years = defaultdict(list)
+        for name, data in all_tournaments.items():
+            years[data['year']].append(name)
+
         for year in sorted(years.keys(), reverse=True):
             with st.expander(f"Year {year} ({len(years[year])})"):
                 for name in years[year]:
-                    year_key = f"year_{name}"; st.checkbox(name, key=year_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, year_key))
+                    year_key = f"year_{name}"
+                    st.checkbox(name, key=year_key, value=st.session_state.tournament_selections.get(name, False), on_change=sync_checkboxes, args=(name, year_key))
 
     st.sidebar.markdown("---")
     
     selected_tournaments = [name for name, is_selected in st.session_state.tournament_selections.items() if is_selected]
 
     if st.sidebar.button("Analyze Selected Tournaments", use_container_width=True, type="primary"):
-    if not selected_tournaments:
-        st.sidebar.error("Please select at least one tournament.")
-    else:
-        # <<< CHANGE #1: A list of all data-related keys to be deleted.
-        keys_to_reset = [
-            'matches_dict', 
-            'tournaments_shown', 
-            'current_mode', 
-            'data_ready', 
-            'bracket_config'
-        ]
-        
-        # <<< CHANGE #2: This loop completely clears the old state.
-        for key in keys_to_reset:
-            if key in st.session_state:
-                del st.session_state[key]
+        if not selected_tournaments:
+            st.sidebar.error("Please select at least one tournament.")
+        else:
+            # <<< FIX: This is the hard reset logic. It clears all old data.
+            keys_to_reset = [
+                'matches_dict', 
+                'tournaments_shown', 
+                'current_mode', 
+                'data_ready', 
+                'bracket_config',
+                'run_sim'
+            ]
+            for key in keys_to_reset:
+                if key in st.session_state:
+                    del st.session_state[key]
 
-        # After the reset, it proceeds to load the new data fresh.
-        with st.spinner(f"Loading data for {len(selected_tournaments)} tournament(s)..."):
-            matches_dict = {}
-            for name in selected_tournaments:
-                path = all_tournaments[name]['path']
-                data, error = load_tournament_matches(path)
-                if data:
-                    matches_dict[name] = data
-            
-            st.session_state.matches_dict = matches_dict
-            st.session_state.tournaments_shown = selected_tournaments
-            st.session_state.current_mode = mode
-            st.session_state.data_ready = True
-        st.rerun()
+            with st.spinner(f"Loading data for {len(selected_tournaments)} tournament(s)..."):
+                matches_dict = {}
+                for name in selected_tournaments:
+                    path = all_tournaments[name]['path']
+                    # Pass the tournament name to the loading function
+                    data, error = load_tournament_matches(path, name)
+                    if error:
+                        st.warning(error)
+                    if data:
+                        matches_dict[name] = data
+                
+                st.session_state.matches_dict = matches_dict
+                st.session_state.tournaments_shown = selected_tournaments
+                st.session_state.current_mode = mode
+                st.session_state.data_ready = True
+            st.rerun()
 
     if st.session_state.get('data_ready', False):
         matches_dict = st.session_state.get('matches_dict', {})
@@ -1172,24 +1192,17 @@ def main():
             st.error("Could not load any match data for the selected tournaments.")
             return
 
-        st.success(f"Displaying analysis for {len(tournaments_shown)} tournament(s). Use the sidebar to change modes or load new data.")
+        st.success(f"Displaying analysis for {len(tournaments_shown)} tournament(s).")
         
-        # This is the main router for displaying the correct page
         if current_mode == 'Playoff Qualification Odds (What-If Scenario)':
-            if len(tournaments_shown) > 1:
-                st.warning("⚠️ Please select only ONE tournament for Playoff Odds analysis.")
-            elif len(tournaments_shown) == 1:
+            if len(tournaments_shown) == 1:
                 tournament_name = tournaments_shown[0]
-                # Pass only the specific tournament's data to this function
                 matches_for_single_tournament = matches_dict.get(tournament_name, [])
                 build_playoff_qualification_ui(matches_for_single_tournament, tournament_name)
             else:
-                # This case can be hit if the selected tournament had no data
-                st.error("No valid tournament data was loaded for the Playoff Odds analysis.")
+                st.warning("⚠️ Please select only ONE tournament for Playoff Odds analysis.")
         else:
-            # All other modes use a combined pool of data from all selected tournaments
             pooled_matches = [match for matches_list in matches_dict.values() for match in matches_list]
-            
             if current_mode == 'Statistics breakdown':
                 build_statistics_breakdown(pooled_matches, tournaments_shown)
             elif current_mode == 'Hero detail drilldown':
@@ -1200,9 +1213,9 @@ def main():
                 build_synergy_counter_dashboard(pooled_matches, tournaments_shown)
             elif current_mode == 'Drafting Assistant':
                 build_enhanced_draft_assistant_ui(pooled_matches, tournaments_shown)
-            pass
     else:
         st.info("📈 Welcome to the Mobile Legends Analytics Dashboard!")
     
     main()
+
 
