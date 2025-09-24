@@ -888,31 +888,54 @@ def build_enhanced_draft_assistant_ui(*args, **kwargs):
 # =================================================
 
 def parse_matches(matches_raw):
-    if not matches_raw: return []
-    first_parent = matches_raw[0].get("parent")
-    if first_parent and any(m.get("parent") != first_parent for m in matches_raw):
-        st.error("Data integrity error: Mixed tournament data detected.")
-        return []
-    
+    """Parses raw match data with robust regular season detection."""
     out = []
     for m in matches_raw:
         if not isinstance(m, dict): continue
+        
         opps = m.get("match2opponents", [])
         if len(opps) != 2: continue
         
-        # <<< FIX: Use normalize_team on team names
         teamA = normalize_team(opps[0].get("name", ""))
         teamB = normalize_team(opps[1].get("name", ""))
-
         if not teamA or not teamB: continue
+        
         dt = pd.to_datetime(m.get("date"), errors="coerce")
         if pd.isnull(dt): continue
-        out.append({
-            "date": dt.date(), "teamA": teamA, "teamB": teamB,
-            "bestof": int(m.get("bestof", 3)), "winner": str(m.get("winner", "")),
-            "scoreA": int(opps[0].get("score", 0)), "scoreB": int(opps[1].get("score", 0)),
-            "is_playoff": m.get("section", "").lower() == "playoffs"
-        })
+
+        # <<< FIX: Using the more comprehensive logic from the original notebook
+        # This correctly identifies regular season, group stages, swiss stages, etc.
+        pagename = m.get("pagename", "")
+        section = m.get("section", "")
+        
+        is_regular_season = any([
+            section != "Playoffs",
+            "/Regular_Season" in pagename,
+            "/Group Stage" in pagename,
+            "/Swiss Stage" in pagename,
+            "Regular" in section,
+            "Week" in section,
+        ])
+        
+        # We can also be more explicit about what is NOT regular season
+        is_playoff = any([
+            "Playoffs" in section,
+            "/Playoffs" in pagename,
+            "/Finals" in pagename,
+        ])
+
+        # A match is considered part of the regular season if it's flagged as such AND not a playoff match
+        if is_regular_season and not is_playoff:
+            out.append({
+                "date": dt.date(), "teamA": teamA, "teamB": teamB,
+                "bestof": int(m.get("bestof", 3)), "winner": str(m.get("winner", "")),
+                "scoreA": int(opps[0].get("score", 0)), "scoreB": int(opps[1].get("score", 0)),
+                "is_playoff": False # Explicitly mark it
+            })
+        elif is_playoff:
+             # We can still add playoff matches for other types of analysis if needed
+             pass
+
     return sorted(out, key=lambda x: x["date"])
 
 def build_week_blocks(dates):
@@ -1228,5 +1251,6 @@ if __name__ == "__main__":
         all_tournaments = {**archived_tournaments, **live_tournaments}
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     main()
+
 
 
