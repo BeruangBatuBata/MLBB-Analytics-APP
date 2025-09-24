@@ -1170,7 +1170,8 @@ def main():
                 matches_dict = {}
                 for name in selected_tournaments:
                     path = all_tournaments[name]['path']
-                    data, error = load_tournament_matches(path) # Removed tournament_name from call
+                    # <<< FIX: Restored the 'name' argument to the function call
+                    data, error = load_tournament_matches(path, name)
                     if error:
                         st.warning(error)
                     if data:
@@ -1220,3 +1221,4 @@ if __name__ == "__main__":
         all_tournaments = {**archived_tournaments, **live_tournaments}
         st.session_state.tournament_selections = {name: False for name in all_tournaments}
     main()
+
